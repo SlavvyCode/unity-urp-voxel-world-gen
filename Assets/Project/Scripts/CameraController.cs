@@ -18,7 +18,8 @@ public class CameraController : MonoBehaviour
     private Vector2 rotation = Vector2.zero;
     [SerializeField] private float lookSensitivity = 0.1f;
     
-    private Vector3 movementVelocity = Vector3.zero;
+    private Vector3 wasdInput = Vector3.zero;
+    private float vertAxisMovement = 0f;
 
 
     private void Awake()
@@ -40,11 +41,17 @@ public class CameraController : MonoBehaviour
         
         
         Actions.Default.Move.performed += ctx => {
-            Vector3 input = ctx.ReadValue<Vector3>();
-            movementVelocity = input.normalized ;
-        };
+            wasdInput = ctx.ReadValue<Vector2>();
+        };     
+        Actions.Default.Move.canceled += ctx => wasdInput = Vector2.zero;
         
-        Actions.Default.Move.canceled += _ => movementVelocity = Vector3.zero;
+        Actions.Default.MoveUpDown.performed += ctx => {
+            //axis for moving up and down - vector1
+            float input = ctx.ReadValue<float>();
+            vertAxisMovement = input;
+        };
+        Actions.Default.MoveUpDown.canceled += ctx => vertAxisMovement = 0f;
+        
     }
 
     private void OnEnable()
@@ -80,10 +87,19 @@ public class CameraController : MonoBehaviour
     private void FixedUpdate()
     {
         
-        if (movementVelocity != Vector3.zero)
+        if (wasdInput != Vector3.zero)
         {
-            Vector3 move = transform.TransformDirection(movementVelocity*currentSpeed) * Time.fixedDeltaTime;
-            transform.position += move;
+            // Rotate the vector to match the camera's orientation
+            Vector3 moveDirection = new Vector3(wasdInput.x, 0, wasdInput.y);
+            moveDirection = transform.TransformDirection(moveDirection).normalized * currentSpeed * Time.fixedDeltaTime;
+            
+            transform.position += moveDirection;
+            
+        }
+        if (Mathf.Abs(vertAxisMovement) > 0.1f)
+        {
+            Vector3 verticalMove = transform.up * vertAxisMovement * currentSpeed * Time.fixedDeltaTime;
+            transform.position += verticalMove;
         }
     }
     
