@@ -1,0 +1,1 @@
+UV coordinates range from (0,0) (bottom-left) to (1,1) (top-right) across the entire atlas.

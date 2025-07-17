@@ -1,0 +1,106 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+public class CameraController : MonoBehaviour
+{
+    
+    PlayerInput playerInput;
+    CameraControls Actions;
+    
+    float sprintSpeed = 10f;
+    float walkSpeed = 5f;
+    float currentSpeed = 5f;
+    [SerializeField] private Vector2 pitchMinMax = new Vector2(-80, 80);
+    
+    private Vector2 rotation = Vector2.zero;
+    [SerializeField] private float lookSensitivity = 0.1f;
+    
+    private Vector3 movementVelocity = Vector3.zero;
+
+
+    private void Awake()
+    {
+
+        playerInput = GetComponent<PlayerInput>();
+
+        Actions = new CameraControls();    }
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        
+        // Bind the camera movement actions
+        // Actions.Default.Move.performed += ctx => Move(ctx);
+        Actions.Default.Sprint.performed += ctx => currentSpeed = sprintSpeed;
+        Actions.Default.Sprint.canceled += ctx => currentSpeed = walkSpeed;
+        Actions.Default.MouseLook.performed += ctx => LookCamera(ctx);
+        
+        
+        Actions.Default.Move.performed += ctx => {
+            Vector3 input = ctx.ReadValue<Vector3>();
+            movementVelocity = input.normalized ;
+        };
+        
+        Actions.Default.Move.canceled += _ => movementVelocity = Vector3.zero;
+    }
+
+    private void OnEnable()
+    {
+
+        Actions.Enable();
+        Actions.Default.Enable();     
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+    }
+
+    private void OnDisable()
+    {
+        Actions.Disable();
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+    }
+
+    //
+    // private void Move(InputAction.CallbackContext context)
+    // {
+    //     Vector3 moveDirection = context.ReadValue<Vector3>();
+    //     if (moveDirection.magnitude > 1f)
+    //     {
+    //         moveDirection.Normalize();
+    //     }
+    //
+    //     Vector3 movement = transform.TransformDirection(moveDirection) * currentSpeed * Time.deltaTime;
+    //     transform.position += movement;
+    // }
+
+    // Physics-compatible movement
+    private void FixedUpdate()
+    {
+        
+        if (movementVelocity != Vector3.zero)
+        {
+            Vector3 move = transform.TransformDirection(movementVelocity*currentSpeed) * Time.fixedDeltaTime;
+            transform.position += move;
+        }
+    }
+    
+    private void LookCamera(InputAction.CallbackContext context)
+    {
+        Vector2 lookDelta = context.ReadValue<Vector2>();
+        
+        // Horizontal rotation (around world Y axis)
+        rotation.x += lookDelta.x * lookSensitivity;
+        
+        // Vertical rotation (around local X axis)
+        rotation.y = Mathf.Clamp(
+            rotation.y - lookDelta.y * lookSensitivity,
+            pitchMinMax.x,
+            pitchMinMax.y
+        );
+        
+        transform.localRotation = Quaternion.Euler(rotation.y, rotation.x, 0);
+    }
+}
