@@ -17,16 +17,50 @@ public class Chunk : MonoBehaviour
 {
     [SerializeField] private Material blockMaterial; // drag this in the Inspector
     public int chunkDimensions = 16;
-
+    private MeshRenderer meshRenderer;
     public void Start()
     { 
+        
+        meshRenderer = GetComponent<MeshRenderer>();
+        meshRenderer.enabled = false; // Start hidden and ONLY show when there is a reason to display the mesh (player looks at it)
+
+        
         GenerateSemiRandomBlocks();
         GenerateMesh();
     }
 
+
+    public void Update()
+    {
+        
+        // FRUSTUM CULLING!
+        
+        
+        // Each frame:
+            // Gets the camera's view frustum as a set of 6 clipping planes
+            // Compares them to the chunk’s bounding box
+            // Enables rendering only if it's inside the frustum
+        // unity already does frustum culling BUT it's per gameobject, so if we spawn chunks in one gameobject or mesh, it won't work.
+        if (Camera.main != null)
+        {
+            Plane[] planes = GeometryUtility.CalculateFrustumPlanes(Camera.main);
+            // if the chunk's bounds are within the camera's frustum, enable the meshRenderer
+            bool visible = GeometryUtility.TestPlanesAABB(planes, meshRenderer.bounds);
+            meshRenderer.enabled = visible;
+        }
+        
+        // TestPlanesAABB
+            // AABB = Axis-Aligned Bounding Box (your chunk’s 3D box)
+            // Unity tests: "Is this box inside or overlapping the view?"
+            // todo ⚠️ Caveats
+                // This assumes each chunk is a GameObject with its own MeshRenderer
+                // also, probably bad to do in update?
+    }
+
+
     // generates a single mesh merged together 
     // todo Optional future tip: switch to a flat BlockType[] with manual index math for performance. OR something else
-    BlockType[][][] blocks;
+    BlockType[] blocks;
 
 //todo i do'nt quite understand i think? it'd be good to visualize this on a cube?
 //like i need to make notes like in a math class to understand this properly
@@ -147,21 +181,37 @@ private static readonly FaceData[] faces = new FaceData[]
 //
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // Initialize block data
     // fill the 3D array with test patterns 
     public void GenerateSemiRandomBlocks()
     {
-        blocks = new BlockType[chunkDimensions][][];
+        blocks = new BlockType[chunkDimensions * chunkDimensions * chunkDimensions];
         for (int x = 0; x < chunkDimensions; x++)
         {
-            blocks[x] = new BlockType[chunkDimensions][];
             for (int y = 0; y < chunkDimensions; y++)
             {
-                blocks[x][y] = new BlockType[chunkDimensions];
                 for (int z = 0; z < chunkDimensions; z++)
                 {
                     // Randomly assign block types for testing from the BlockType enum
-                    blocks[x][y][z] = (BlockType)Random.Range(0, System.Enum.GetValues(typeof(BlockType)).Length);
+                    // since blocs is a 2d array now, we use index math.
+                    // essentially, every chunkDimensions, we make a new row of blocks. 
+                    blocks[x * chunkDimensions * chunkDimensions + y * chunkDimensions + z] = 
+                        (BlockType)Random.Range(0, Enum.GetValues(typeof(BlockType)).Length);
+                    
                 }
             }
         }
@@ -174,22 +224,35 @@ private static readonly FaceData[] faces = new FaceData[]
         List<int> triangles = new List<int>();
 
         // Step 1: Face culling & vertex generation
-        for (var i = 0; i < blocks.Length; i++)
-        {
-        }
-
         ForEachBlockInChunk((x, y, z) =>
         {
-            if (WorldUtils.IsBlockSolid(x, y, z, blocks))
+            if (WorldUtils.IsBlockSolidAndInChunk(x, y, z, blocks, chunkDimensions))
             {
                 AddVisibleFaces(x, y, z, vertices, triangles);
             }
         });
-        //
-        // Step 2: Build the mesh
+        // Build the mesh
         ApplyMeshData(vertices, triangles);
     }
 
+    
+    
+    // frustum cullign - faces beyond FOV are discarded
+    // then more culling (occlusion culling) by faces that are obscured by solid blocks are discarded as well (behind a hill)
+    
+    
+    
+    // THEN let's try to make some sort of actual world generation
+    
+    
+    
+    // also optimize vertexes themselves - positions can be represented as bytes (smallest data type) since they're whole numbers.
+    
+    
+    //profiling as done in the video-  spam Stopwatches everywhere to see where the bottlenecks are - unity's default profiler is just everythings a big green  blob
+    
+    
+    
     
     // OK
     // Iterate through each block in the chunk and apply the action 
@@ -234,6 +297,10 @@ private static readonly FaceData[] faces = new FaceData[]
         throw new ArgumentException("Invalid face index");
     }
 
+    private int ToIndex(int x, int y, int z)
+    {
+        return x * chunkDimensions * chunkDimensions + y * chunkDimensions + z;
+    }
 
 
     // Check if neighboring blocks are solid (if yes, skip that face).
@@ -241,7 +308,7 @@ private static readonly FaceData[] faces = new FaceData[]
     private void AddVisibleFaces(int x, int y, int z, List<Vertex> vertices, List<int> triangles)
     {
         //xyz is the position of the block in the chunk
-        BlockType current = blocks[x][y][z];
+        BlockType current = blocks[ToIndex(x, y, z)];
 
         foreach (var face in faces)
         {
@@ -251,7 +318,7 @@ private static readonly FaceData[] faces = new FaceData[]
             //is this neigbor pos chunk border or air? add face
             // todo this is inefficient once there will be multiple chunks together which will block each other
             if (!IsInBounds(neighborPos) ||
-                !WorldUtils.IsBlockSolid(neighborPos.x, neighborPos.y, neighborPos.z, blocks))
+                !WorldUtils.IsBlockSolidAndInChunk(neighborPos.x, neighborPos.y, neighborPos.z, blocks, chunkDimensions))
                 // if (true)
             {
                 // If neighbor is out of bounds or not solid, add this face
@@ -283,7 +350,8 @@ private static readonly FaceData[] faces = new FaceData[]
                 //This preserves clockwise winding order (which tells the GPU which side is the front). If you reverse it, the face might become invisible due to backface culling.
                 
                 
-                // todo so yeah we just split it up by threes and hope that the triangles were added  correctly. it's unsafe for parallelism though
+                // todo make safe for parallelism with Jobs later?
+                // so yeah we just split it up by threes and hope that the triangles were added  correctly. 
                 triangles.Add(startIndex + 0);
                 triangles.Add(startIndex + 2);
                 triangles.Add(startIndex + 1);
@@ -295,8 +363,7 @@ private static readonly FaceData[] faces = new FaceData[]
         }
     }
 
-    // todo what is this?
-    // This is the part that actually creates the Unity Mesh object and assigns it to a MeshFilter.
+    //  creates the Unity Mesh object and assigns it to a MeshFilter.
     private void ApplyMeshData(List<Vertex> vertices, List<int> triangles)
     {
         Mesh mesh = new Mesh();
@@ -321,12 +388,11 @@ private static readonly FaceData[] faces = new FaceData[]
         if (mf == null) mf = gameObject.AddComponent<MeshFilter>();
         mf.mesh = mesh;
 
-        MeshRenderer mr = GetComponent<MeshRenderer>();
-        if (mr == null) mr = gameObject.AddComponent<MeshRenderer>();
+        if (meshRenderer == null) meshRenderer = gameObject.AddComponent<MeshRenderer>();
 
         // This part was missing — assign the material
         if (blockMaterial != null)
-            mr.material = blockMaterial;
+            meshRenderer.material = blockMaterial;
         else
             Debug.LogWarning("Block material not assigned in the inspector.");
     }

@@ -7,9 +7,14 @@ public class WorldUtils
     // Utility methods for world generation
 
     // Check if a block is solid
-    public static bool IsBlockSolid(int x, int y, int z, BlockType[][][] blocks)
+    public static bool IsBlockSolidAndInChunk(int x, int y, int z, BlockType[] flatBlocks, int dim)
     {
-        return blocks[x][y][z] != BlockType.Air;
+        if (x < 0 || y < 0 || z < 0 || x >= dim || y >= dim || z >= dim)
+            return false;
+
+        int index = x * dim * dim + y * dim + z;
+        return flatBlocks[index] != BlockType.Air;
     }
+
  
 }
