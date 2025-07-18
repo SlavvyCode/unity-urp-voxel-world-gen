@@ -5,6 +5,9 @@ using Unity.VisualScripting;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
+using static VoxelConstants;
+
+
 public struct FaceData
 {
     public Vector3Int direction; // direction of the face (e.g., up, down, left, etc.)
@@ -16,20 +19,72 @@ public struct FaceData
 public class Chunk : MonoBehaviour
 {
     [SerializeField] private Material blockMaterial; // drag this in the Inspector
-    public int chunkDimensions = 16;
     private MeshRenderer meshRenderer;
-    public void Start()
+    private int seed; // for random generation
+    private Vector2Int chunkCoord; // coordinates of the chunk in the world
+    private float perlinScale; // scale for Perlin noise
+    public void Awake()
     { 
         
         meshRenderer = GetComponent<MeshRenderer>();
         meshRenderer.enabled = false; // Start hidden and ONLY show when there is a reason to display the mesh (player looks at it)
 
-        
-        GenerateSemiRandomBlocks();
-        GenerateMesh();
+        //
+        // GenerateSemiRandomBlocks();
+        // GenerateMesh();
     }
 
 
+    // Call this from WorldGenerator right after Instantiate
+    public void Initialize(int worldSeed, Vector2Int coord, float perlinScale)
+    {
+        this.perlinScale = perlinScale;
+
+        seed = worldSeed;
+        chunkCoord = coord;
+        transform.position = new Vector3(chunkCoord.x * CHUNK_SIZE, 0, chunkCoord.y * CHUNK_SIZE);
+        Debug.Log($"Chunk initialized at {transform.position}."); 
+        
+        GenerateBlocks();
+        GenerateMesh();
+    }
+    
+    
+    void GenerateBlocks()
+    {
+        blocks = new BlockType[CHUNK_SIZE* CHUNK_SIZE * CHUNK_SIZE];
+
+        // for each coordinate - each block - it generates a height based on Perlin noise
+        for (int x = 0; x < CHUNK_SIZE; x++)
+        for (int z = 0; z < CHUNK_SIZE; z++)
+        {
+            
+            Vector2 offset = new Vector2(
+                Mathf.Sin(seed * 0.1f) * 1000f,
+                Mathf.Cos(seed * 0.1f) * 1000f
+            );
+            
+            // World position of block
+            int worldX = chunkCoord.x * CHUNK_SIZE + x;
+            int worldZ = chunkCoord.y * CHUNK_SIZE + z;
+            
+            float sampleX = (worldX + offset.x) * perlinScale;
+            float sampleZ = (worldZ + offset.y) * perlinScale;
+            
+            
+            // Generate a noise value based on world position   
+            float noise = Perlin.Noise(sampleX, sampleZ);            
+            int height = Mathf.FloorToInt(noise * CHUNK_SIZE); // Scale to chunk height
+
+            for (int y = 0; y < CHUNK_SIZE; y++)
+            {
+                blocks[ToIndex(x,y,z)] = y < height ? BlockType.Grass : BlockType.Air;
+            }
+        }
+    }
+
+    
+    
     public void Update()
     {
         
@@ -52,9 +107,6 @@ public class Chunk : MonoBehaviour
         // TestPlanesAABB
             // AABB = Axis-Aligned Bounding Box (your chunk’s 3D box)
             // Unity tests: "Is this box inside or overlapping the view?"
-            // todo ⚠️ Caveats
-                // This assumes each chunk is a GameObject with its own MeshRenderer
-                // also, probably bad to do in update?
     }
 
 
@@ -167,7 +219,7 @@ private static readonly FaceData[] faces = new FaceData[]
 };
 
 
-    // chunkdimensions for x and y and z
+    // CHUNK_SIZE for x and y and z
 
 
     //code adds 4 verts for only unobscured faces by solid blocks
@@ -199,17 +251,17 @@ private static readonly FaceData[] faces = new FaceData[]
     // fill the 3D array with test patterns 
     public void GenerateSemiRandomBlocks()
     {
-        blocks = new BlockType[chunkDimensions * chunkDimensions * chunkDimensions];
-        for (int x = 0; x < chunkDimensions; x++)
+        blocks = new BlockType[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        for (int x = 0; x < CHUNK_SIZE; x++)
         {
-            for (int y = 0; y < chunkDimensions; y++)
+            for (int y = 0; y < CHUNK_SIZE; y++)
             {
-                for (int z = 0; z < chunkDimensions; z++)
+                for (int z = 0; z < CHUNK_SIZE; z++)
                 {
                     // Randomly assign block types for testing from the BlockType enum
                     // since blocs is a 2d array now, we use index math.
-                    // essentially, every chunkDimensions, we make a new row of blocks. 
-                    blocks[x * chunkDimensions * chunkDimensions + y * chunkDimensions + z] = 
+                    // essentially, every CHUNK_SIZE, we make a new row of blocks. 
+                    blocks[x * CHUNK_SIZE * CHUNK_SIZE + y * CHUNK_SIZE + z] = 
                         (BlockType)Random.Range(0, Enum.GetValues(typeof(BlockType)).Length);
                     
                 }
@@ -226,7 +278,7 @@ private static readonly FaceData[] faces = new FaceData[]
         // Step 1: Face culling & vertex generation
         ForEachBlockInChunk((x, y, z) =>
         {
-            if (WorldUtils.IsBlockSolidAndInChunk(x, y, z, blocks, chunkDimensions))
+            if (WorldUtils.IsBlockSolidAndInChunk(x, y, z, blocks, CHUNK_SIZE))
             {
                 AddVisibleFaces(x, y, z, vertices, triangles);
             }
@@ -258,11 +310,11 @@ private static readonly FaceData[] faces = new FaceData[]
     // Iterate through each block in the chunk and apply the action 
     private void ForEachBlockInChunk(Action<int, int, int> action)
     {
-        for (int x = 0; x < chunkDimensions; x++)
+        for (int x = 0; x < CHUNK_SIZE; x++)
         {
-            for (int y = 0; y < chunkDimensions; y++)
+            for (int y = 0; y < CHUNK_SIZE; y++)
             {
-                for (int z = 0; z < chunkDimensions; z++)
+                for (int z = 0; z < CHUNK_SIZE; z++)
                 {
                     action(x, y, z);
                 }
@@ -299,7 +351,7 @@ private static readonly FaceData[] faces = new FaceData[]
 
     private int ToIndex(int x, int y, int z)
     {
-        return x * chunkDimensions * chunkDimensions + y * chunkDimensions + z;
+        return x * CHUNK_SIZE * CHUNK_SIZE + y * CHUNK_SIZE + z;
     }
 
 
@@ -318,7 +370,7 @@ private static readonly FaceData[] faces = new FaceData[]
             //is this neigbor pos chunk border or air? add face
             // todo this is inefficient once there will be multiple chunks together which will block each other
             if (!IsInBounds(neighborPos) ||
-                !WorldUtils.IsBlockSolidAndInChunk(neighborPos.x, neighborPos.y, neighborPos.z, blocks, chunkDimensions))
+                !WorldUtils.IsBlockSolidAndInChunk(neighborPos.x, neighborPos.y, neighborPos.z, blocks, CHUNK_SIZE))
                 // if (true)
             {
                 // If neighbor is out of bounds or not solid, add this face
@@ -400,8 +452,8 @@ private static readonly FaceData[] faces = new FaceData[]
     
     private bool IsInBounds(Vector3Int neighborPos)
     {
-        return neighborPos.x >= 0 && neighborPos.x < chunkDimensions &&
-               neighborPos.y >= 0 && neighborPos.y < chunkDimensions &&
-               neighborPos.z >= 0 && neighborPos.z < chunkDimensions;
+        return neighborPos.x >= 0 && neighborPos.x < CHUNK_SIZE &&
+               neighborPos.y >= 0 && neighborPos.y < CHUNK_SIZE &&
+               neighborPos.z >= 0 && neighborPos.z < CHUNK_SIZE;
     }
 }
