@@ -275,8 +275,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   pitchMinMax: {x: -80, y: 80}
   lookSensitivity: 0.1
-  walkSpeed: 5
-  sprintSpeed: 10
+  walkSpeed: 10
+  sprintSpeed: 30
   debugCamera: {fileID: 1257324622}
   debugToggleKey: 284
   debugMoveSpeed: 15
@@ -510,13 +510,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2f3e66524d7f8084599912fc6f901182, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  perlinScale: 0.005
   chunkPrefab: {fileID: 7231958408946135945, guid: 7573a08ee2860c544b85f9b44fa53c5e,
     type: 3}
-  renderDistance: 2
   player: {fileID: 490580662}
+  renderDistance: 6
+  baseHeight: 1
+  heightVariation: 128
+  terrainRoughness: 0.02
   randomizeSeed: 1
   worldSeed: 2
-  perlinScale: 0.001
+  noiseLayers: 4
 --- !u!4 &956999256
 Transform:
   m_ObjectHideFlags: 0
@@ -672,7 +676,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1257324620
 MonoBehaviour:
   m_ObjectHideFlags: 0

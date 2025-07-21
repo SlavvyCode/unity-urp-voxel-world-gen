@@ -6,7 +6,7 @@ using UnityEngine;
 
 // modified taken from https://en.wikipedia.org/w/index.php?title=Perlin_noise&oldid=1230993513
 // unity already has a Perlin noise implementation, but this one is better.
-public static class Perlin 
+public static class MyPerlin 
 {
     private struct Vector2f
     {
@@ -78,6 +78,7 @@ public static class Perlin
         float ix1 = Interpolate(n0, n1, sx);
 
         float value = Interpolate(ix0, ix1, sy);
+        // Normalize the value to the range [0, 1]
         return Mathf.Clamp((value + 1f) * 0.5f, 0f, 1f);
     }
 }
