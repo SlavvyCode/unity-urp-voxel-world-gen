@@ -4,19 +4,13 @@ using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
 using static VoxelConstants;
-
-
-public struct FaceData
-{
-    public Vector3Int direction; // direction of the face (e.g., up, down, left, etc.)
-    public Vector3[] cornerOffsets; // 4 corners relative to block
-    public Vector3 normal;
-}
+using static WorldUtils;
 
 
 public class Chunk : MonoBehaviour
@@ -27,6 +21,7 @@ public class Chunk : MonoBehaviour
     private Vector3Int chunkCoord; // coordinates of the chunk in the world
     private float perlinScale; // scale for Perlin noise
     // chunks
+    BlockType[] blocks;
     private Vector2 perlinOffset; // offset for Perlin noise to create variation
     public void Awake()
     { 
@@ -39,7 +34,7 @@ public class Chunk : MonoBehaviour
         // GenerateMesh();
     }
     
-    private static readonly FaceData[] faces = WorldUtils.faces;
+    private static readonly Vector3FaceData[] faces = WorldUtils.vector3Faces;
     
     public void Update()
     {
@@ -68,8 +63,6 @@ public class Chunk : MonoBehaviour
     }
 
 
-    // generates a single mesh merged together 
-    BlockType[] blocks;
 
 
     // CHUNK_SIZE for x and y and z
@@ -191,37 +184,7 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    // OK
-    // for a line-based texture atlas, calculate UV coordinates for a given block type and face.
-    Vector2 GetBlockUV(BlockType type, int face)
-    {
-        // get the total number of block types in the enum
-        // Enum.GetValues() returns an array of all values in the enum.
-        int totalTiles = Enum.GetValues(typeof(BlockType)).Length;
 
-        
-        float tileWidth = 1f / totalTiles;
-
-        int index = (int)type;
-
-        // Bottom-left corner of the tile (index * tileWidth on X, always 0 on Y)
-        Vector2 uvMin = new Vector2(index * tileWidth, 0f);
-
-        switch (face)
-        {
-            case 0: return uvMin + new Vector2(0, 0);                     // Bottom-left
-            case 1: return uvMin + new Vector2(tileWidth, 0);             // Bottom-right
-            case 2: return uvMin + new Vector2(0, 1f);                    // Top-left
-            case 3: return uvMin + new Vector2(tileWidth, 1f);            // Top-right
-        }
-
-        throw new ArgumentException("Invalid face index");
-    }
-
-    private int ToIndex(int x, int y, int z)
-    {
-        return x * CHUNK_SIZE * CHUNK_SIZE + y * CHUNK_SIZE + z;
-    }
 
 
     // Check if neighboring blocks are solid (if yes, skip that face).
@@ -229,7 +192,7 @@ public class Chunk : MonoBehaviour
     private void AddVisibleFaces(int x, int y, int z, List<Vertex> vertices, List<int> triangles)
     {
         //xyz is the position of the block in the chunk
-        BlockType current = blocks[ToIndex(x, y, z)];
+        BlockType current = blocks[CoordsToIndex(x, y, z)];
 
         foreach (var face in faces)
         {
@@ -241,7 +204,7 @@ public class Chunk : MonoBehaviour
             
             //is this neigbor pos chunk border or air? add face
             // todo this is inefficient once there will be multiple chunks together which will block each other
-            if (!IsInBounds(neighborPos) ||
+            if (!IsInBoundsOfChunk(neighborPos) ||
                 !WorldUtils.IsBlockSolidAndInChunk(neighborPos.x, neighborPos.y, neighborPos.z, blocks, CHUNK_SIZE))
             {
                 // If neighbor is out of bounds or not solid, add this face
@@ -273,7 +236,6 @@ public class Chunk : MonoBehaviour
                 //This preserves clockwise winding order (which tells the GPU which side is the front). If you reverse it, the face might become invisible due to backface culling.
                 
                 
-                // todo make safe for parallelism with Jobs later?
                 // so yeah we just split it up by threes and hope that the triangles were added  correctly. 
                 triangles.Add(startIndex + 0);
                 triangles.Add(startIndex + 2);
@@ -345,7 +307,7 @@ public class Chunk : MonoBehaviour
         for (int z = 0; z < CHUNK_SIZE; z++)
         {
             // Optional: restrict this to just the border blocks
-            if (IsBorder(x, y, z) && blocks[ToIndex(x, y, z)] == BlockType.Air)
+            if (IsChunkBorder(x, y, z) && blocks[CoordsToIndex(x, y, z)] == BlockType.Air)
                 return false;
         }
 
@@ -386,7 +348,7 @@ public class Chunk : MonoBehaviour
 
                 // Check if the block is air.
                 // If even one block on the face is air, the wall is not solid.
-                if (neighbor.blocks[ToIndex(x, y, z)] == BlockType.Air)
+                if (neighbor.blocks[CoordsToIndex(x, y, z)] == BlockType.Air)
                     return false;
             }
         }
@@ -396,19 +358,7 @@ public class Chunk : MonoBehaviour
     }
 
 
-    private bool IsBorder(int x, int y, int z)
-    {
-        return x == 0 || x == CHUNK_SIZE - 1 ||
-               y == 0 || y == CHUNK_SIZE - 1 ||
-               z == 0 || z == CHUNK_SIZE - 1;
-    }
-    private bool IsInBounds(Vector3Int neighborPos)
-    {
-        return neighborPos.x >= 0 && neighborPos.x < CHUNK_SIZE &&
-               neighborPos.y >= 0 && neighborPos.y < CHUNK_SIZE &&
-               neighborPos.z >= 0 && neighborPos.z < CHUNK_SIZE;
-    }
-
+    
 
 public void Initialize(int worldSeed, Vector3Int chunkCoord, Dictionary<Vector3Int, Chunk>chunks , float terrainRoughness, 
                         float baseHeight, float heightVariation, int noiseLayers)
@@ -424,8 +374,8 @@ public void Initialize(int worldSeed, Vector3Int chunkCoord, Dictionary<Vector3I
     );
     
     perlinOffset = new Vector2(
-        Mathf.Sin(seed * 0.1f) * 1000f,
-        Mathf.Cos(seed * 0.1f) * 1000f
+        math.sin(seed * 0.1f) * 1000f,
+        math.cos(seed * 0.1f) * 1000f
     );
     
     GenerateBlocks(baseHeight, heightVariation, noiseLayers);
@@ -451,7 +401,7 @@ private void GenerateBlocks(float baseHeight, float heightVariation, int noiseLa
         for (int y = 0; y < CHUNK_SIZE; y++)
         {
             int worldY = worldBaseY + y;
-            int index = ToIndex(x, y, z);
+            int index = CoordsToIndex(x, y, z);
             
             if (worldY < height)
             {

@@ -1,10 +1,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using static VoxelConstants;
 
-public class WorldGenerator : MonoBehaviour
+public class OldWorldGenerator : MonoBehaviour
 {
     // 0.005f → Very large hills
     // 0.02f → Natural looking hills
@@ -171,4 +173,5 @@ public class WorldGenerator : MonoBehaviour
     }
 
 
+    
 }
