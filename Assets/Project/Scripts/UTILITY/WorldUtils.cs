@@ -381,6 +381,15 @@ public class WorldUtils
             Mathf.FloorToInt(position.z / CHUNK_SIZE)
         );
     }
+    
+    public static int3 GetChunkCoords(float3 position)
+    {
+        return new int3(
+            Mathf.FloorToInt(position.x / CHUNK_SIZE),
+            Mathf.FloorToInt(position.y / CHUNK_SIZE),
+            Mathf.FloorToInt(position.z / CHUNK_SIZE)
+        );
+    }
 
     public static Vector2 GetBlockUV(BlockType type, int face)
     {

@@ -1,4 +1,6 @@
 using TMPro;
+using Unity.Entities;
+using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -6,17 +8,24 @@ using UnityEngine.InputSystem;
 public class CameraController : MonoBehaviour
 {
     [Header("Main Camera Controls")]
-    [SerializeField] private Vector2 pitchMinMax = new Vector2(-80, 80);
+    [SerializeField] private Vector2 pitchMinMax = new Vector2(-90, 90);
     [SerializeField] private float lookSensitivity = 0.1f;
     [SerializeField] private float walkSpeed = 10f;
     [SerializeField] private float sprintSpeed = 30f;
-    
+
+    [Space]
+    [Header("Drag along object")] 
+    private Entity playerEntity;
+    private EntityManager entityManager;
+    private LocalTransform playerTransform;
+    [Space]
     [Header("Debug Camera")]
     [SerializeField] private Camera debugCamera;
     [SerializeField] private KeyCode debugToggleKey = KeyCode.F3;
     [SerializeField] private float debugMoveSpeed = 15f;
     [SerializeField] private GUIStyle debugTextStyle;
-
+    
+    
     private Camera mainCamera;
     private CameraControls actions;
     private float currentSpeed;
@@ -62,6 +71,18 @@ public class CameraController : MonoBehaviour
             debugCamera.gameObject.SetActive(false);
         debugMode = false;
         
+        entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        EntityQuery playerQuery = entityManager.CreateEntityQuery(typeof(PlayerTag), typeof(LocalTransform));
+        var entities = playerQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
+        playerEntity = entities[0];
+        entities.Dispose();
+
+        if (entityManager.HasComponent<LocalTransform>(playerEntity))
+        {
+            LocalTransform playerTransform = entityManager.GetComponentData<LocalTransform>(playerEntity);
+             playerTransform.Position = transform.position;
+             playerTransform.Rotation = transform.rotation;
+        }
         
         actions.Default.Sprint.performed += ctx => currentSpeed = debugMode ? debugMoveSpeed : sprintSpeed;
         actions.Default.Sprint.canceled += ctx => currentSpeed = debugMode ? debugMoveSpeed : walkSpeed;
@@ -143,6 +164,15 @@ public class CameraController : MonoBehaviour
             Vector3 verticalMove = Vector3.up * vertAxisMovement * currentSpeed * Time.fixedDeltaTime;
             transform.position += verticalMove;
         }
+        
+
+        //structs are copies!
+        entityManager.SetComponentData(playerEntity, new LocalTransform
+        {
+            Position =  transform.position,
+            Rotation =  transform.rotation,
+            Scale = 1f
+        });
     }
 
     private void HandleDebugMovement()
@@ -160,7 +190,7 @@ public class CameraController : MonoBehaviour
         Vector3 move = debugCamera.transform.TransformDirection(
             new Vector3(wasdInput.x, vertAxisMovement, wasdInput.y)
         ) * currentSpeed * Time.fixedDeltaTime;
-        
+
         debugCamera.transform.position += move;
     }
 
