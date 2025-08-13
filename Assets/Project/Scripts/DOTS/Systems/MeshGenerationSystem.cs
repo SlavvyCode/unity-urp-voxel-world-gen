@@ -28,6 +28,13 @@ public partial struct MeshGenerationSystem : ISystem
     private NativeArray<int> triangles;
     private NativeArray<float2> uvs;
     public BufferLookup<DOTS_Block> BlockLookup;
+    
+    
+    public NativeQueue<Entity> MeshQueue; // or (chunkEntity, renderData) if needed
+    public static int maxChunksPerFrame = 2;      // chunks processed per frame
+
+    
+    
     public struct MeshSlice
     {
         public int VerticesStart, VerticesLength;
@@ -46,22 +53,16 @@ public partial struct MeshGenerationSystem : ISystem
     // [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        // if (!PlayerChangedChunks(ref state)) return;
-        GetPlayerRenderDistance(ref state);
-        var query1 = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, ChunkMeshPending>()
-            .Build();
-
-        if (query1.CalculateEntityCount() == 0)
-        {
-            Debug.Log("No chunks ready for mesh generation.");
+        //return if player doesn't exist and get render distance
+        if (!GetPlayerRenderDistance(ref state)) 
             return;
-        }
-        else
-        {
-            Debug.Log($"Generating mesh for {query1.CalculateEntityCount()} chunks.");
-        }
+        
+        if (!ChunkMeshesPending(ref state)) return;
 
+        BlockLookup.Update(ref state);
+        
+        #region Vars Initialization
+        
         //check if disposed
         if (vertices.IsCreated == false || triangles.IsCreated == false || uvs.IsCreated == false)
         {
@@ -71,9 +72,6 @@ public partial struct MeshGenerationSystem : ISystem
             uvs = new NativeArray<float2>(INITIAL_SIZE, Allocator.Persistent);
         }
 
-        BlockLookup.Update(ref state);
-        
-        
         var trisRequiredSize = CalculateMaxRequiredTriangles(maxChunks);
         var vertsRequiredSize = CalculateMaxRequiredVertices(maxChunks);
 
@@ -89,26 +87,16 @@ public partial struct MeshGenerationSystem : ISystem
             triangles = new NativeArray<int>(trisRequiredSize, Allocator.Persistent);
         }
 
-
-        // Atomic counters
         var vertexCounter = new AtomicCounter(Allocator.TempJob);
         var triangleCounter = new AtomicCounter(Allocator.TempJob);
         var uvCounter = new AtomicCounter(Allocator.TempJob);
-
-
-        // Lists to track slices and entities
-        //todo initialize with a reasonable size, or use a dynamic approach
-        // This is a temporary solution, ideally we should use a more dynamic approach
-        // get player's render distance and use that to determine the size of these lists 
-        // OR // use a dynamic list that grows as needed
-
+        
         var meshSlices = new NativeList<MeshSlice>(maxChunks, Allocator.TempJob);
         var meshEntities = new NativeList<Entity>(maxChunks, Allocator.TempJob);
-        // state.GetBufferLookup<DOTS_Block>(true).Update(ref state);
         var ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>()
             .CreateCommandBuffer(state.WorldUnmanaged);
         var ecbParallel = ecb.AsParallelWriter();
-        
+        #endregion       
         
         var job = new MeshGenerationJob
         {
@@ -128,19 +116,33 @@ public partial struct MeshGenerationSystem : ISystem
             ecb = ecbParallel
         };
 
-        // log the entities your system is iterating right before the job schedule. .
-        Debug.Log("Meshentities before job: " + meshEntities.Length);
-
-
-        // state.Dependency = job.ScheduleParallel(query1, state.Dependency);
-
         state.Dependency = job.ScheduleParallel(state.Dependency);
-        //UnityException: GetOrCreateTrackerHandleImpl can only be called from the main thread. HERE
         state.Dependency.Complete();
 
-        Debug.Log("entities after job: " + meshEntities.Length);
-
         // Enqueue mesh upload requests on main thread
+        SendMeshRequest(meshSlices, meshEntities);
+
+        // Dispose all temporaries
+        DisposeVars(vertexCounter, triangleCounter, uvCounter, meshSlices, meshEntities);
+    }
+
+    private bool ChunkMeshesPending(ref SystemState state)
+    {
+        var desiredChunks = SystemAPI.QueryBuilder()
+            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, ChunkMeshPending>()
+            .Build();
+        if (desiredChunks.CalculateEntityCount() == 0)
+        {
+            Debug.LogWarning("No chunks ready for mesh generation.");
+            return false;
+        }
+
+        return true;
+    }
+
+
+    private void SendMeshRequest(NativeList<MeshSlice> meshSlices, NativeList<Entity> meshEntities)
+    {
         for (int i = 0; i < meshSlices.Length; i++)
         {
             var slice = meshSlices[i];
@@ -163,8 +165,11 @@ public partial struct MeshGenerationSystem : ISystem
                 UVs = uvsList
             });
         }
+    }
 
-        // Dispose all temporaries
+    private void DisposeVars(AtomicCounter vertexCounter, AtomicCounter triangleCounter, AtomicCounter uvCounter,
+        NativeList<MeshSlice> meshSlices, NativeList<Entity> meshEntities)
+    {
         vertices.Dispose();
         triangles.Dispose();
         uvs.Dispose();
@@ -177,7 +182,7 @@ public partial struct MeshGenerationSystem : ISystem
         meshEntities.Dispose();
     }
 
-// Calculate based on worst-case scenario (all blocks visible)
+    // Calculate based on worst-case scenario (all blocks visible)
     public static int CalculateMaxRequiredVertices(int chunkCount)
     {
         const int BLOCKS_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
@@ -213,7 +218,7 @@ public partial struct MeshGenerationSystem : ISystem
         return false;
     }
 
-    private void GetPlayerRenderDistance(ref SystemState state)
+    private bool GetPlayerRenderDistance(ref SystemState state)
     {
         // Get the player's render distance from PlayerSettings
         foreach (var playerSettings in SystemAPI.Query<RefRO<PlayerSettings>>().WithAll<PlayerTag>())
@@ -221,9 +226,11 @@ public partial struct MeshGenerationSystem : ISystem
             int renderDistance = playerSettings.ValueRO.renderDistance;
             int chunksToRender = renderDistance * 2 + 1;
             maxChunks = chunksToRender * chunksToRender * chunksToRender;
-            return;
+            return true;
         }
         maxChunks = 0; // or any other default value
+        // player doesn't exist
+        return false;
     }
     
     
