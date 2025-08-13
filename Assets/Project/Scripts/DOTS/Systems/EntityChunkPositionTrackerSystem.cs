@@ -9,27 +9,31 @@ using UnityEngine;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
 public partial struct EntityChunkPositionTrackerSystem : ISystem
 {
-    [BurstCompile]
+
+    // [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        foreach (var (transform, chunkPos, lastChunkPos,entity) in
-                 //todo make sure local transform actualy gets gotten
-                 SystemAPI.Query<RefRO<LocalTransform>, RefRW<ContainerChunkCoords>, RefRW<LastChunkCoords>>().WithAll<PlayerTag>().WithEntityAccess())
+        foreach (var (transform, 
+                     chunkCoord, 
+                     lastChunkPos, entity) 
+                 in
+                 SystemAPI.Query<
+                     RefRO<LocalTransform>,
+                     RefRW<EntityChunkCoords>,
+                     RefRW<LastChunkCoords>>()
+                     .WithAll<PlayerTag>()
+                     .WithNone<NewlySpawnedPlayerTag>()
+                     .WithEntityAccess())
         {
-            int3 newChunk = GetChunkCoord(transform.ValueRO.Position);
+            int3 newChunk = WorldPosToChunkCoord(transform.ValueRO.Position);
             
             if (!newChunk.Equals(lastChunkPos.ValueRO.Value))
             {
-                chunkPos.ValueRW.Value = newChunk;
+                Debug.Log("Chunk changed from " + lastChunkPos.ValueRO.Value + " to " + newChunk);
+                chunkCoord.ValueRW.newChunkCoords = newChunk;
+                chunkCoord.ValueRW.OnChunkChange = true;
                 lastChunkPos.ValueRW.Value = newChunk;
-                
-                // Debug.Log("Player newchunk = " + newChunk);
-                // Optional: Add event component if needed
-                // ecb.AddComponent<ChunkPositionChanged>(entity);
             }
         }
     }
-
-
-
 }

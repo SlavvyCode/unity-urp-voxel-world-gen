@@ -74,7 +74,12 @@ public class CameraController : MonoBehaviour
         entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         EntityQuery playerQuery = entityManager.CreateEntityQuery(typeof(PlayerTag), typeof(LocalTransform));
         var entities = playerQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
-        playerEntity = entities[0];
+
+        if (entities.IsCreated && entities.Length > 0)
+        {   
+            
+            playerEntity = entities[0];
+        }
         entities.Dispose();
 
         if (entityManager.HasComponent<LocalTransform>(playerEntity))
@@ -164,8 +169,10 @@ public class CameraController : MonoBehaviour
             Vector3 verticalMove = Vector3.up * vertAxisMovement * currentSpeed * Time.fixedDeltaTime;
             transform.position += verticalMove;
         }
-        
 
+
+        if (!entityManager.Exists(playerEntity))
+            return;
         //structs are copies!
         entityManager.SetComponentData(playerEntity, new LocalTransform
         {

@@ -142,4 +142,3 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   meshChildGameObject: {fileID: 1778148671759500957}
-  chunkPrefab: {fileID: 6427397043981636573}

@@ -45,7 +45,11 @@ public class MeshUploadHandler : MonoBehaviour
             mesh.SetUVs(0,uvs);
             filter.mesh = mesh;
             renderer.enabled = true;
+            
+            Debug.Log("MeshUploadHandler: mesh uploaded");
 
+            
+            // meshUploadRequest.MeshEntity.RemoveComponent<ChunkMeshPending>();
             meshUploadRequest.Vertices.Dispose();
             meshUploadRequest.Triangles.Dispose();
             // this.enabled = false;
