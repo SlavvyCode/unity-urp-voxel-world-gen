@@ -11,66 +11,34 @@ using static Project.Scripts.DOTS.Other.DOTS_Utils;
 [BurstCompile]
 [UpdateAfter(typeof(ChunkDespawnSystem))]
 [UpdateBefore(typeof(MeshGenerationSystem))]
-public partial struct ChunkBlockGeneration : ISystem
+public partial struct ChunkBlockGenerationSystem : ISystem
 {
     // public void OnCreate(ref SystemState state) 
 
     public void OnUpdate(ref SystemState state)
     {
-        // foreach (var (transform,
-        //              chunkCoord,
-        //              lastChunkPos)
-        //          in
-        //          SystemAPI.Query<
-        //                  RefRO<LocalTransform>,
-        //                  RefRW<EntityChunkCoords>,
-        //                  RefRW<LastChunkCoords>>()
-        //              .WithAll<PlayerTag>())
-        // {
-        //     if (chunkCoord.ValueRO.OnChunkChange == false)
-        //     {
-        //         return;
-        //     }
-        // }
-//query for chunkblockspending
-
         var desiredChunks = SystemAPI.QueryBuilder()
             .WithAny<ChunkBlocksPending>().Build().ToEntityArray(Allocator.Temp);
 
         if (desiredChunks.Length == 0)
         {
-            Debug.Log("No chunks pending block generation");
+            // Debug.Log("No chunks need BLOCK generation");
             desiredChunks.Dispose();
             return;
         }
+        // Debug.Log($"Found {desiredChunks.Length} chunks that need BLOCK generation");
 
-        Debug.Log("Generating blocks for all chunks");
 
         var query = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk>() // chunk component must exist
-            .WithNone<DOTS_Block>() // buffer must exist
+            .WithAll<DOTS_Chunk,ChunkBlocksPending,DOTS_Block>() 
             .Build();
-
-
-        query = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk>() // chunk component must exist
-            .WithAny<DOTS_Block>() // buffer must exist
-            .Build();
-
-        if (query.CalculateEntityCount() == 0)
-        {
-            Debug.Log("No chunks ready for block generation with blocks");
-        }
-        else
-        {
-            Debug.Log($"Found {query.CalculateEntityCount()} chunks ready for block generation with blocks");
-        }
+        
         var ECB = new EntityCommandBuffer(Allocator.TempJob);
         state.Dependency = new ChunkBlockGenerationJob
             {
                 ECB = ECB.AsParallelWriter()
             }
-            .ScheduleParallel(state.Dependency);
+            .ScheduleParallel(query,state.Dependency);
 
         state.Dependency.Complete();
         
@@ -84,9 +52,9 @@ public partial struct ChunkBlockGenerationJob : IJobEntity
 {
     public EntityCommandBuffer.ParallelWriter ECB;
     void Execute([EntityIndexInQuery] int sortKey,Entity entity, DynamicBuffer<DOTS_Block> blocks,
-        in DOTS_Chunk chunk)
+        in DOTS_Chunk chunk, ChunkBlocksPending pending)
     {
-        DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
+        // DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
         blocks.Clear();
         int blockCount = 0;
         // Fill first layer with grass
@@ -115,6 +83,6 @@ public partial struct ChunkBlockGenerationJob : IJobEntity
         ECB.AddComponent<ChunkMeshPending>(sortKey,entity);
         ECB.RemoveComponent<ChunkBlocksPending>(sortKey, entity);
 
-        DotsDebugLog($"Added {blockCount} blocks to chunk at {chunk.ChunkCoord}");
+        // DotsDebugLog($"Added {blockCount} blocks to chunk at {chunk.ChunkCoord}");
     }
 }

@@ -28,11 +28,11 @@ public struct GenerateMeshDataJob : IJob
             if (blocks[index] == BlockType.Air) continue;
 
             // Naive: always add 6 faces for now (improve later)
-            AddVisibleFaces(x, y, z, blocks, vertices, triangles);
+            AddVisibleFacesToBlock(x, y, z, blocks, vertices, triangles);
         }
     }
 
-    private void AddVisibleFaces(int x, int y, int z, NativeArray<BlockType> blocks, NativeList<Vertex> vertices, NativeList<int> triangles)
+    private void AddVisibleFacesToBlock(int x, int y, int z, NativeArray<BlockType> blocks, NativeList<Vertex> vertices, NativeList<int> triangles)
     {
         BlockType current = blocks[CoordsToIndex(x, y, z)];
 

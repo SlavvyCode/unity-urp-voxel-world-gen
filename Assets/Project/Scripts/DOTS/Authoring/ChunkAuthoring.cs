@@ -59,9 +59,9 @@ public struct DOTS_Block : IBufferElementData {
 public struct MeshDataRequest
 {
     public Entity MeshEntity;
-    public NativeList<Vertex> Vertices;
-    public NativeList<int> Triangles;
-    public NativeList<float2> UVs;
+    public NativeArray<Vertex> Vertices;
+    public NativeArray<int> Triangles;
+    public NativeArray<float2> UVs;
 }
 
 
@@ -75,3 +75,8 @@ public static class MeshUploadQueue
 public struct ChunkBlocksPending : IComponentData
 {
 } 
+
+
+public struct LoadedChunksPending : IComponentData
+{
+}

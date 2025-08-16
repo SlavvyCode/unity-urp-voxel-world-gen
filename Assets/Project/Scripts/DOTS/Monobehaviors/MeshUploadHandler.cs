@@ -24,29 +24,43 @@ public class MeshUploadHandler : MonoBehaviour
             var filter = entityManager.GetComponentObject<MeshFilter>(meshUploadRequest.MeshEntity);
             var renderer = entityManager.GetComponentObject<MeshRenderer>(meshUploadRequest.MeshEntity);
             Mesh mesh = new Mesh();
-            List<Vector3> verts = new List<Vector3>();
-            for (int i = 0; i < meshUploadRequest.Vertices.Length; i++)
-                verts.Add(meshUploadRequest.Vertices[i].position);
+  
+            
+            var vertsArray = meshUploadRequest.Vertices;
+            Vector3[] verts = new Vector3[vertsArray.Length];
+            for (int i = 0; i < vertsArray.Length; i++)
+                verts[i] = vertsArray[i].position;
+
+
+            // List<int> tris = new List<int>();
+            // for (int i = 0; i < meshUploadRequest.Triangles.Length; i++)
+            //     tris.Add(meshUploadRequest.Triangles[i]); 
+            NativeArray<int> trisArray = meshUploadRequest.Triangles;
+            int[] tris = new int[trisArray.Length];
+            for (int i = 0; i < trisArray.Length; i++)
+                tris[i] = trisArray[i];
+           
+            
+            
+            
+            // List<Vector2> uvs = new List<Vector2>();
+            // for (int i = 0; i < meshUploadRequest.UVs.Length; i++)
+            //     uvs.Add(meshUploadRequest.UVs[i]); 
+            NativeArray<float2> uvsArray = meshUploadRequest.UVs;
+            Vector2[] uvs = new Vector2[uvsArray.Length];
+            for (int i = 0; i < uvsArray.Length; i++)
+                uvs[i] = new Vector2(uvsArray[i].x, uvsArray[i].y);
+            
+
+            
             mesh.SetVertices(verts);
-
-            List<int> tris = new List<int>();
-            for (int i = 0; i < meshUploadRequest.Triangles.Length; i++)
-                tris.Add(meshUploadRequest.Triangles[i]); 
-            
-            
-            
-            List<Vector2> uvs = new List<Vector2>();
-            for (int i = 0; i < meshUploadRequest.UVs.Length; i++)
-                uvs.Add(meshUploadRequest.UVs[i]); 
-
-            
             mesh.SetTriangles(tris, 0);
             mesh.RecalculateNormals();
             mesh.SetUVs(0,uvs);
             filter.mesh = mesh;
             renderer.enabled = true;
             
-            Debug.Log("MeshUploadHandler: mesh uploaded");
+            // Debug.Log("MeshUploadHandler: mesh uploaded");
 
             
             // meshUploadRequest.MeshEntity.RemoveComponent<ChunkMeshPending>();

@@ -22,7 +22,7 @@ public class PlayerAuthoring : MonoBehaviour
             //singleton
             AddComponent<LastChunkCoords>(entity);
             //add buffer for loaded chunks
-            AddBuffer<LoadedChunk>(entity);
+            AddBuffer<PlayerLoadedChunk>(entity);
             //add newly spawned player tag
             AddComponent<NewlySpawnedPlayerTag>(entity);
         }
@@ -55,7 +55,7 @@ public struct LastChunkCoords : IComponentData
     public int3 Value;
 }
 
-public struct LoadedChunk : IBufferElementData
+public struct PlayerLoadedChunk : IBufferElementData
 {
     public int3 ChunkCoord;
     public Entity ChunkEntity;

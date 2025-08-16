@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using Project.Scripts.DOTS.Other;
 using Project.Scripts.DOTS.Systems;
+using Project.Scripts.UTILITY;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -15,7 +16,7 @@ using static Project.Scripts.DOTS.Other.DOTS_Utils;
 
 // [BurstCompile]
 
-// [BurstCompile]
+[BurstCompile]
 [UpdateAfter(typeof(ChunkDespawnSystem))]
 public partial struct MeshGenerationSystem : ISystem
 {
@@ -28,48 +29,78 @@ public partial struct MeshGenerationSystem : ISystem
     private NativeArray<int> triangles;
     private NativeArray<float2> uvs;
     public BufferLookup<DOTS_Block> BlockLookup;
-    
-    
-    public NativeQueue<Entity> MeshQueue; // or (chunkEntity, renderData) if needed
-    public static int maxChunksPerFrame = 2;      // chunks processed per frame
 
-    
-    
+
+    public NativeQueue<Entity> MeshQueue; // or (chunkEntity, renderData) if needed
+    public static int maxChunksPerFrame = 2; // chunks processed per frame
+
+    NativeQueue<MeshSlice> meshSliceQueue;
+    NativeQueue<Entity> meshEntityQueue;
+
+    AtomicCounter vertexCounter;
+    AtomicCounter triangleCounter;
+    AtomicCounter uvCounter;
+
     public struct MeshSlice
     {
         public int VerticesStart, VerticesLength;
         public int TrianglesStart, TrianglesLength;
         public int UVsStart, UVsLength;
+        public bool InUse;
     }
 
     public void OnCreate(ref SystemState state)
     {
-        vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent);
-        triangles = new NativeArray<int>(INITIAL_SIZE, Allocator.Persistent);
-        uvs = new NativeArray<float2>(INITIAL_SIZE, Allocator.Persistent);
+        initializeMeshVars();
         BlockLookup = state.GetBufferLookup<DOTS_Block>(true);
+        
+        
+        vertexCounter = new AtomicCounter(Allocator.Persistent);
+        triangleCounter = new AtomicCounter(Allocator.Persistent);
+        uvCounter = new AtomicCounter(Allocator.Persistent); 
+        
+        meshSliceQueue = new NativeQueue<MeshSlice>(Allocator.Persistent);
+        meshEntityQueue = new NativeQueue<Entity>(Allocator.Persistent);
+        // Initialize the mesh upload queue
+        
+        
     }
 
-    // [BurstCompile]
+    public void OnDestroy(ref SystemState state)
+    {
+        // Dispose of the buffers
+        if (vertices.IsCreated) vertices.Dispose();
+        if (triangles.IsCreated) triangles.Dispose();
+        if (uvs.IsCreated) uvs.Dispose();
+
+        vertexCounter.Dispose();
+        triangleCounter.Dispose();
+        uvCounter.Dispose();
+        
+        meshSliceQueue.Dispose();
+        meshEntityQueue.Dispose();
+
+    }
+
+    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         //return if player doesn't exist and get render distance
-        if (!GetPlayerRenderDistance(ref state)) 
+        if (!GetPlayerRenderDistance(ref state))
             return;
-        
+
         if (!ChunkMeshesPending(ref state)) return;
 
+
         BlockLookup.Update(ref state);
-        
-        #region Vars Initialization
-        
+
+        #region Vars Init and Reset
+
         //check if disposed
         if (vertices.IsCreated == false || triangles.IsCreated == false || uvs.IsCreated == false)
         {
             // Reinitialize the buffers if they were disposed
-            vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent);
-            triangles = new NativeArray<int>(INITIAL_SIZE, Allocator.Persistent);
-            uvs = new NativeArray<float2>(INITIAL_SIZE, Allocator.Persistent);
+            initializeMeshVars();
         }
 
         var trisRequiredSize = CalculateMaxRequiredTriangles(maxChunks);
@@ -87,18 +118,25 @@ public partial struct MeshGenerationSystem : ISystem
             triangles = new NativeArray<int>(trisRequiredSize, Allocator.Persistent);
         }
 
-        var vertexCounter = new AtomicCounter(Allocator.TempJob);
-        var triangleCounter = new AtomicCounter(Allocator.TempJob);
-        var uvCounter = new AtomicCounter(Allocator.TempJob);
         
-        var meshSlices = new NativeList<MeshSlice>(maxChunks, Allocator.TempJob);
-        var meshEntities = new NativeList<Entity>(maxChunks, Allocator.TempJob);
-        var ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>()
-            .CreateCommandBuffer(state.WorldUnmanaged);
+        // reset counters
+        vertexCounter.Reset();
+        triangleCounter.Reset();
+        uvCounter.Reset();
+        
+        
+        meshSliceQueue.Clear();
+        meshEntityQueue.Clear();
+
+        var ecbSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+        var ecb = ecbSystem.CreateCommandBuffer();
         var ecbParallel = ecb.AsParallelWriter();
-        #endregion       
-        
-        var job = new MeshGenerationJob
+
+        #endregion
+
+
+
+        var meshGenerationJob = new MeshGenerationJob
         {
             BlockLookup = BlockLookup,
 
@@ -108,22 +146,42 @@ public partial struct MeshGenerationSystem : ISystem
 
             VertexCounter = vertexCounter,
             TriangleCounter = triangleCounter,
-            SliceCounter = new AtomicCounter(Allocator.TempJob),
             UVCounter = uvCounter,
 
-            MeshSlices = meshSlices.AsParallelWriter(),
-            MeshEntities = meshEntities.AsParallelWriter(),
-            ecb = ecbParallel
+            MeshSliceQueue = meshSliceQueue.AsParallelWriter(),
+            MeshEntityQueue = meshEntityQueue.AsParallelWriter(),
+
+            ecb = ecbParallel,
         };
 
-        state.Dependency = job.ScheduleParallel(state.Dependency);
+        state.Dependency = meshGenerationJob.ScheduleParallel(state.Dependency);
         state.Dependency.Complete();
 
+        // ecb.Playback(state.EntityManager);
         // Enqueue mesh upload requests on main thread
-        SendMeshRequest(meshSlices, meshEntities);
 
-        // Dispose all temporaries
-        DisposeVars(vertexCounter, triangleCounter, uvCounter, meshSlices, meshEntities);
+        // non queue variant
+        // SendMeshRequest(meshSlices, meshEntities);
+
+
+        while (meshSliceQueue.TryDequeue(out var slice) && meshEntityQueue.TryDequeue(out var entity))
+        {
+            MeshUploadQueue.Queue.Enqueue(new MeshDataRequest
+            {
+                MeshEntity = entity,
+                Vertices = vertices.GetSubArray(slice.VerticesStart, slice.VerticesLength),
+                Triangles = triangles.GetSubArray(slice.TrianglesStart, slice.TrianglesLength),
+                UVs = uvs.GetSubArray(slice.UVsStart, slice.UVsLength)
+            });
+        }
+
+    }
+
+    private void initializeMeshVars()
+    {
+        vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent);
+        triangles = new NativeArray<int>(INITIAL_SIZE, Allocator.Persistent);
+        uvs = new NativeArray<float2>(INITIAL_SIZE, Allocator.Persistent);
     }
 
     private bool ChunkMeshesPending(ref SystemState state)
@@ -133,8 +191,12 @@ public partial struct MeshGenerationSystem : ISystem
             .Build();
         if (desiredChunks.CalculateEntityCount() == 0)
         {
-            Debug.LogWarning("No chunks ready for mesh generation.");
+            // Debug.LogWarning("No chunks need MESH generation.");
             return false;
+        }
+        else
+        {
+            // Debug.Log($"Found {desiredChunks.CalculateEntityCount()} chunks that need MESH generation.");
         }
 
         return true;
@@ -167,20 +229,6 @@ public partial struct MeshGenerationSystem : ISystem
         }
     }
 
-    private void DisposeVars(AtomicCounter vertexCounter, AtomicCounter triangleCounter, AtomicCounter uvCounter,
-        NativeList<MeshSlice> meshSlices, NativeList<Entity> meshEntities)
-    {
-        vertices.Dispose();
-        triangles.Dispose();
-        uvs.Dispose();
-
-        vertexCounter.Dispose();
-        triangleCounter.Dispose();
-        uvCounter.Dispose();
-
-        meshSlices.Dispose();
-        meshEntities.Dispose();
-    }
 
     // Calculate based on worst-case scenario (all blocks visible)
     public static int CalculateMaxRequiredVertices(int chunkCount)
@@ -197,26 +245,6 @@ public partial struct MeshGenerationSystem : ISystem
         return chunkCount * BLOCKS_PER_CHUNK * TRIANGLES_PER_BLOCK;
     }
 
-    private bool PlayerChangedChunks(ref SystemState state)
-    {
-        foreach (var (chunkCoord, playerSettings) in SystemAPI.Query<RefRO<EntityChunkCoords>, RefRO<PlayerSettings>>()
-                     .WithAll<PlayerTag>())
-        {
-            int renderDistance = playerSettings.ValueRO.renderDistance;
-            int chunksToRender = renderDistance * 2 + 1;
-            maxChunks = chunksToRender * chunksToRender * chunksToRender;
-            if (chunkCoord.ValueRO.OnChunkChange)
-            {
-
-                // todo temporarily hardcoded to 1000, this should be set based on player render distance once it's implemented
-                // maxChunks = 1000;
-                return true;
-            }
-        }
-              
-
-        return false;
-    }
 
     private bool GetPlayerRenderDistance(ref SystemState state)
     {
@@ -228,12 +256,13 @@ public partial struct MeshGenerationSystem : ISystem
             maxChunks = chunksToRender * chunksToRender * chunksToRender;
             return true;
         }
+
         maxChunks = 0; // or any other default value
         // player doesn't exist
         return false;
     }
-    
-    
+
+
     [BurstCompile]
     private partial struct MeshGenerationJob : IJobEntity
     {
@@ -244,31 +273,29 @@ public partial struct MeshGenerationSystem : ISystem
         [NativeDisableParallelForRestriction] public NativeArray<float2> UVs;
 
         public AtomicCounter VertexCounter;
-        public AtomicCounter TriangleCounter; 
+        public AtomicCounter TriangleCounter;
         public AtomicCounter UVCounter;
-        public AtomicCounter SliceCounter;
 
-        public NativeList<MeshSlice>.ParallelWriter MeshSlices;
-        public NativeList<Entity>.ParallelWriter MeshEntities;
+        public NativeQueue<MeshSlice>.ParallelWriter MeshSliceQueue;
+        public NativeQueue<Entity>.ParallelWriter MeshEntityQueue;
 
-        public int innerMaxChunks;
         public EntityCommandBuffer.ParallelWriter ecb;
-        void Execute(in Entity entity, in DOTS_Chunk chunk, in DOTS_ChunkRenderData renderData, in ChunkMeshPending meshPending)
+
+        void Execute([EntityIndexInQuery] int sortKey, in Entity entity, in DOTS_Chunk chunk,
+            in DOTS_ChunkRenderData renderData, in ChunkMeshPending meshPending)
         {
             DynamicBuffer<DOTS_Block> blocks = BlockLookup[entity];
 
             if (blocks.IsEmpty)
-            {
                 throw new InvalidOperationException(
                     $"No blocks found for entity {entity}. Ensure the chunk has been initialized with blocks.");
-                // DotsDebugLog("No blocks found for entity!!!!!!!!!! " + entity);
-                return;
-            }
+         
 
             // Local temporary storage
             var localVertices = new NativeList<Vertex>(Allocator.Temp);
             var localTriangles = new NativeList<int>(Allocator.Temp);
 
+            //generate mesh data by filling local lists
             GenerateChunkMesh(blocks, ref localVertices, ref localTriangles);
 
             // Reserve space atomically
@@ -276,13 +303,13 @@ public partial struct MeshGenerationSystem : ISystem
             int triStart = TriangleCounter.Add(localTriangles.Length);
             int uvStart = UVCounter.Add(localVertices.Length);
 
-            // Copy local data into big buffers
-            // ARGUMENT OUT OF RANGE HERE
             localVertices.AsArray().CopyTo(Vertices.GetSubArray(vertStart, localVertices.Length));
             localTriangles.AsArray().CopyTo(Triangles.GetSubArray(triStart, localTriangles.Length));
 
+
             for (int i = 0; i < localVertices.Length; i++)
                 UVs[uvStart + i] = localVertices[i].uv;
+
 
             var meshSlice = new MeshSlice
             {
@@ -293,25 +320,16 @@ public partial struct MeshGenerationSystem : ISystem
                 UVsStart = uvStart,
                 UVsLength = localVertices.Length
             };
-            
+
             // Record slice and entity
-            MeshSlices.AddNoResize(meshSlice);
-            MeshEntities.AddNoResize(renderData.MeshEntity);
+            // MeshSlices.AddNoResize(meshSlice);
+            // MeshEntities.AddNoResize(renderData.MeshEntity);
 
-            // int sliceIndex = SliceCounter.Add(1);
-            // if (sliceIndex < innerMaxChunks)
-            // {
-            //     MeshSlices.AddNoResize(meshSlice);
-            //     MeshEntities.AddNoResize(renderData.MeshEntity);
-            //     DotsDebugLog($"Added mesh data at index {sliceIndex}");
-            // }
-            // else
-            // {
-            //     DotsDebugLog($"Failed to add mesh data - capacity exceeded at index {sliceIndex}");
-            // }
-            
-            ecb.RemoveComponent<ChunkMeshPending>(0,entity);
+            MeshSliceQueue.Enqueue(meshSlice);
+            MeshEntityQueue.Enqueue(renderData.MeshEntity);
 
+
+            ecb.RemoveComponent<ChunkMeshPending>(sortKey, entity);
 
             localVertices.Dispose();
             localTriangles.Dispose();
@@ -329,13 +347,13 @@ public partial struct MeshGenerationSystem : ISystem
 
                 if (block.Value != BlockType.Air)
                 {
-                    AddVisibleFaces(x, y, z, block.Value, blocks, vertices, triangles);
+                    AddVisibleFacesToBlock(x, y, z, block.Value, blocks, vertices, triangles);
                 }
             }
         }
 
 
-        public void AddVisibleFaces(int x, int y, int z, BlockType blockType, DynamicBuffer<DOTS_Block> blocks,
+        public void AddVisibleFacesToBlock(int x, int y, int z, BlockType blockType, DynamicBuffer<DOTS_Block> blocks,
             NativeList<Vertex> vertices, NativeList<int> triangles)
         {
             foreach (var face in FaceData.AllFaces)
@@ -344,14 +362,22 @@ public partial struct MeshGenerationSystem : ISystem
                 // theoretically we could save some small performance by not adding triangles that are not facing the camera in the first place.
 
 
-                int3 neighborPos = new int3(x, y, z) + face.direction;
+                //todo Only update the faces at chunk borders when a neighboring chunk is loaded.
 
-                //is this neigbor pos chunk border or air? add face
-                // todo render all for now
-                // todo this is inefficient once there will be multiple chunks together which will block each other
-                // if (!IsInBoundsOfChunk(neighborPos) ||
-                //     !WorldUtils.IsBlockSolidAndInChunk(neighborPos.x, neighborPos.y, neighborPos.z, blocks, CHUNK_SIZE))
-                // {
+                int3 neighborPos = new int3(x, y, z) + face.direction;
+                //if neighborPos is out of bounds, 
+                bool neighborOutOfBounds = neighborPos.x < 0 || neighborPos.x >= CHUNK_SIZE ||
+                                           neighborPos.y < 0 || neighborPos.y >= CHUNK_SIZE ||
+                                           neighborPos.z < 0 || neighborPos.z >= CHUNK_SIZE;
+                if (!neighborOutOfBounds)
+                {
+                    // if neighbor is solid, don't add those faces
+                    if (blocks[ToIndex(neighborPos.x, neighborPos.y, neighborPos.z)].Value != BlockType.Air)
+                    {
+                        continue;
+                    }
+                }
+
                 // If neighbor is out of bounds or not solid, add this face
                 // Add 4 vertices for the face
                 int startIndex = vertices.Length;
@@ -484,5 +510,14 @@ public struct AtomicCounter
     {
         get => counter[0];
         set => counter[0] = value;
+    }
+    
+    
+    public void Reset()
+    {
+        if (counter.IsCreated)
+        {
+            counter[0] = 0;
+        }
     }
 }
