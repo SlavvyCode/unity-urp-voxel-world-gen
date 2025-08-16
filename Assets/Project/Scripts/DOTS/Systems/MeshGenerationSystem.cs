@@ -1,27 +1,17 @@
 using System;
-using System.Linq;
-using System.Threading;
 using Project.Scripts.DOTS.Other;
 using Project.Scripts.DOTS.Systems;
-using Project.Scripts.UTILITY;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Mathematics;
-using Unity.Transforms;
-using UnityEngine;
-using UnityEngine.PlayerLoop;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
-
-// [BurstCompile]
 
 [BurstCompile]
 [UpdateAfter(typeof(ChunkDespawnSystem))]
 public partial struct MeshGenerationSystem : ISystem
 {
-    // private const int MAX_TOTAL_VERTICES = 1000000; // adjust based on max expected mesh size
-    // private const int MAX_TOTAL_TRIANGLES = 2000000;
+    #region vars
     int maxChunks; // this will be set based on player render distance
 
     private const int INITIAL_SIZE = 1024; // initial size for the buffers
@@ -30,25 +20,26 @@ public partial struct MeshGenerationSystem : ISystem
     private NativeArray<float2> uvs;
     public BufferLookup<DOTS_Block> BlockLookup;
 
-
-    public NativeQueue<Entity> MeshQueue; // or (chunkEntity, renderData) if needed
-    public static int maxChunksPerFrame = 2; // chunks processed per frame
-
     NativeQueue<MeshSlice> meshSliceQueue;
     NativeQueue<Entity> meshEntityQueue;
 
     AtomicCounter vertexCounter;
     AtomicCounter triangleCounter;
     AtomicCounter uvCounter;
+    
+    private NativeQueue<Entity> chunksToGenerateQueue;
+    public static int maxChunksPerFrame = 2; // chunks processed per frame
 
+    #endregion
+    
     public struct MeshSlice
     {
         public int VerticesStart, VerticesLength;
         public int TrianglesStart, TrianglesLength;
         public int UVsStart, UVsLength;
-        public bool InUse;
     }
 
+    
     public void OnCreate(ref SystemState state)
     {
         initializeMeshVars();
@@ -61,9 +52,9 @@ public partial struct MeshGenerationSystem : ISystem
         
         meshSliceQueue = new NativeQueue<MeshSlice>(Allocator.Persistent);
         meshEntityQueue = new NativeQueue<Entity>(Allocator.Persistent);
-        // Initialize the mesh upload queue
         
-        
+        chunksToGenerateQueue = new NativeQueue<Entity>(Allocator.Persistent);
+
     }
 
     public void OnDestroy(ref SystemState state)
@@ -91,6 +82,10 @@ public partial struct MeshGenerationSystem : ISystem
 
         if (!ChunkMeshesPending(ref state)) return;
 
+        foreach (var (chunk,chunkEntity) in SystemAPI.Query<RefRO<DOTS_Chunk>>().WithAll<ChunkMeshPending>().WithEntityAccess())
+        {
+            chunksToGenerateQueue.Enqueue(chunkEntity);
+        }
 
         BlockLookup.Update(ref state);
 
@@ -106,7 +101,6 @@ public partial struct MeshGenerationSystem : ISystem
         var trisRequiredSize = CalculateMaxRequiredTriangles(maxChunks);
         var vertsRequiredSize = CalculateMaxRequiredVertices(maxChunks);
 
-        // Allocate big shared buffers (TempJob because disposed end of frame)
         if (vertices.Length < vertsRequiredSize)
         {
             vertices = new NativeArray<Vertex>(vertsRequiredSize, Allocator.Persistent);
@@ -157,12 +151,6 @@ public partial struct MeshGenerationSystem : ISystem
         state.Dependency = meshGenerationJob.ScheduleParallel(state.Dependency);
         state.Dependency.Complete();
 
-        // ecb.Playback(state.EntityManager);
-        // Enqueue mesh upload requests on main thread
-
-        // non queue variant
-        // SendMeshRequest(meshSlices, meshEntities);
-
 
         while (meshSliceQueue.TryDequeue(out var slice) && meshEntityQueue.TryDequeue(out var entity))
         {
@@ -201,34 +189,6 @@ public partial struct MeshGenerationSystem : ISystem
 
         return true;
     }
-
-
-    private void SendMeshRequest(NativeList<MeshSlice> meshSlices, NativeList<Entity> meshEntities)
-    {
-        for (int i = 0; i < meshSlices.Length; i++)
-        {
-            var slice = meshSlices[i];
-            var entity = meshEntities[i];
-
-            var vertsList = new NativeList<Vertex>(slice.VerticesLength, Allocator.Persistent);
-            vertsList.AddRange(vertices.GetSubArray(slice.VerticesStart, slice.VerticesLength));
-
-            var trisList = new NativeList<int>(slice.TrianglesLength, Allocator.Persistent);
-            trisList.AddRange(triangles.GetSubArray(slice.TrianglesStart, slice.TrianglesLength));
-
-            var uvsList = new NativeList<float2>(slice.UVsLength, Allocator.Persistent);
-            uvsList.AddRange(uvs.GetSubArray(slice.UVsStart, slice.UVsLength));
-
-            MeshUploadQueue.Queue.Enqueue(new MeshDataRequest
-            {
-                MeshEntity = entity,
-                Vertices = vertsList,
-                Triangles = trisList,
-                UVs = uvsList
-            });
-        }
-    }
-
 
     // Calculate based on worst-case scenario (all blocks visible)
     public static int CalculateMaxRequiredVertices(int chunkCount)
@@ -321,9 +281,6 @@ public partial struct MeshGenerationSystem : ISystem
                 UVsLength = localVertices.Length
             };
 
-            // Record slice and entity
-            // MeshSlices.AddNoResize(meshSlice);
-            // MeshEntities.AddNoResize(renderData.MeshEntity);
 
             MeshSliceQueue.Enqueue(meshSlice);
             MeshEntityQueue.Enqueue(renderData.MeshEntity);
@@ -420,104 +377,6 @@ public partial struct MeshGenerationSystem : ISystem
                 triangles.Add(startIndex + 2);
                 triangles.Add(startIndex + 3);
             }
-        }
-    }
-}
-
-public struct MeshSlice
-{
-    public int VerticesStart;
-    public int VerticesLength;
-    public int TrianglesStart;
-    public int TrianglesLength;
-    public int UVsStart;
-    public int UVsLength;
-}
-
-public static class MeshWriter
-{
-    // vertexBuffer = shared NativeList = has all chunks’ vertices in one big continuous array.
-    // vertices = chunk-specific NativeArray = just the vertices generated for one chunk
-
-    // Adds vertices and records their start index and count in the slice
-    public static void AddVertices(NativeList<Vertex> vertexBuffer, ref MeshSlice slice, NativeArray<Vertex> vertices)
-    {
-        slice.VerticesStart = vertexBuffer.Length;
-        slice.VerticesLength = vertices.Length;
-        vertexBuffer.AddRange(vertices);
-    }
-
-    // Adds triangles and records their start index and count in the slice
-    public static void AddTriangles(NativeList<int> triangleBuffer, ref MeshSlice slice, NativeArray<int> triangles)
-    {
-        slice.TrianglesStart = triangleBuffer.Length;
-        slice.TrianglesLength = triangles.Length;
-        triangleBuffer.AddRange(triangles);
-    }
-
-    // Adds UVs and records their start index and count in the slice
-    public static void AddUVs(NativeList<float2> uvBuffer, ref MeshSlice slice, NativeArray<float2> uvs)
-    {
-        slice.UVsStart = uvBuffer.Length;
-        slice.UVsLength = uvs.Length;
-        uvBuffer.AddRange(uvs);
-    }
-
-    // Convenience method to add all mesh data in one call
-    public static void AddMeshData(
-        NativeList<Vertex> vertexBuffer,
-        NativeList<int> triangleBuffer,
-        NativeList<float2> uvBuffer,
-        ref MeshSlice slice,
-        NativeArray<Vertex> vertices,
-        NativeArray<int> triangles,
-        NativeArray<float2> uvs)
-    {
-        AddVertices(vertexBuffer, ref slice, vertices);
-        AddTriangles(triangleBuffer, ref slice, triangles);
-        AddUVs(uvBuffer, ref slice, uvs);
-    }
-}
-
-
-[BurstCompile]
-public struct AtomicCounter
-{
-    private NativeArray<int> counter;
-
-    public AtomicCounter(Allocator allocator)
-    {
-        counter = new NativeArray<int>(1, allocator);
-        counter[0] = 0;
-    }
-
-    public void Dispose()
-    {
-        if (counter.IsCreated) counter.Dispose();
-    }
-
-    public int Add(int value)
-    {
-        // Use Interlocked.Add for atomic addition
-        unsafe
-        {
-            int* ptr = (int*)NativeArrayUnsafeUtility.GetUnsafePtr(counter);
-            return Interlocked.Add(ref *ptr, value) - value;
-        }
-    }
-
-    public int Value
-    {
-        get => counter[0];
-        set => counter[0] = value;
-    }
-    
-    
-    public void Reset()
-    {
-        if (counter.IsCreated)
-        {
-            counter[0] = 0;
         }
     }
 }
