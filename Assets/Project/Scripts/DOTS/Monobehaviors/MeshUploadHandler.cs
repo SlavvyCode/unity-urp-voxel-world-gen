@@ -19,7 +19,7 @@ public class MeshUploadHandler : MonoBehaviour
 
     void LateUpdate()
     {
-        while (MeshUploadQueue.Queue.TryDequeue(out var meshUploadRequest))
+        while (MeshUploadQueues.PreviousQueue.TryDequeue(out var meshUploadRequest))
         {
             var filter = entityManager.GetComponentObject<MeshFilter>(meshUploadRequest.MeshEntity);
             var renderer = entityManager.GetComponentObject<MeshRenderer>(meshUploadRequest.MeshEntity);

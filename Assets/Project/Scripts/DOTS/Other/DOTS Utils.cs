@@ -186,6 +186,26 @@ namespace Project.Scripts.DOTS.Other
         {
             Debug.Log(message);
         }
+        
+        public static void DotsDebugLogFormat(string message, object[] args)
+        {
+            Debug.LogFormat(message, args);
+        }
 
+        public static void DotsDebugLogFormat(LogType logType, LogOption logOption, UnityEngine.Object context, string message, params object[] args)
+        {
+            if (logType == LogType.Error)
+            {
+                Debug.LogErrorFormat(context, message, args);
+            }
+            else if (logType == LogType.Warning)
+            {
+                Debug.LogWarningFormat(context, message, args);
+            }
+            else
+            {
+                Debug.LogFormat(context, message, args);
+            }
+        }
     }
 }

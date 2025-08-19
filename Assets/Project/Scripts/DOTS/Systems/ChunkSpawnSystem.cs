@@ -68,7 +68,6 @@ public partial struct ChunkSpawnSystem : ISystem
         var ecbParallelWriter = ecbSystem.CreateCommandBuffer().AsParallelWriter();
 
 
-
         foreach (var (
                      settings,
                      chunkCoord,
@@ -112,7 +111,7 @@ public partial struct ChunkSpawnSystem : ISystem
 
             var handle = job.Schedule(total, math.max(1, total / 64), state.Dependency);
             handle.Complete();
-  
+
             // state.Dependency = JobHandle.CombineDependencies(state.Dependency, handle);
 
 
@@ -122,7 +121,6 @@ public partial struct ChunkSpawnSystem : ISystem
         //for non-system ecb, you need to playback the commands after the job is done
         // ecb.Playback(state.EntityManager);
         // ecb.Dispose();
-
     }
 }
 
@@ -144,37 +142,36 @@ public partial struct DOTS_SpawnChunksJob : IJobParallelFor
 
         int3 newCoords = PlayerChunkCoord + offset;
 
-        DotsDebugLog("ChunkSpawn: Spawning chunk at " + newCoords);
-            // Queue chunk spawn
-            Entity chunk = ECB.Instantiate(index, ChunkPrefabEntity);
-            // When you do ECB.CreateEntity(index) with an empty command buffer (not from a prefab), the entity starts with no components.
-            //first param is sortkey - determines the order of execution
-            ECB.SetComponent(index, chunk, new LocalTransform
-            {
-                Position = (GetChunkWorldPos(newCoords)),
-                Rotation = quaternion.identity,
-                Scale = 1f
-            });
-            ECB.SetComponent<DOTS_Chunk>(index, chunk, new DOTS_Chunk
-            {
-                ChunkCoord = newCoords
-            });
-            ECB.AddComponent<LoadedChunksPending>(index, chunk);
-            ECB.AddBuffer<DOTS_Block>(index, chunk); 
-            // ECB.AddComponent(index, chunk, new DOTS_Chunk{ ChunkCoord = newCoords });
-            // Debug.Log("ChunkSpawn: adding chunk to queue " + newCoords);
+        DotsDebugLog("ChunkSpawn at " + newCoords);
+        // Queue chunk spawn
+        Entity chunk = ECB.Instantiate(index, ChunkPrefabEntity);
+        // When you do ECB.CreateEntity(index) with an empty command buffer (not from a prefab), the entity starts with no components.
+        //first param is sortkey - determines the order of execution
+        ECB.SetComponent(index, chunk, new LocalTransform
+        {
+            Position = (GetChunkWorldPos(newCoords)),
+            Rotation = quaternion.identity,
+            Scale = 1f
+        });
+        ECB.SetComponent<DOTS_Chunk>(index, chunk, new DOTS_Chunk
+        {
+            ChunkCoord = newCoords
+        });
+        ECB.AddComponent<LoadedChunksPending>(index, chunk);
+        ECB.AddBuffer<DOTS_Block>(index, chunk);
+        // ECB.AddComponent(index, chunk, new DOTS_Chunk{ ChunkCoord = newCoords });
+        // Debug.Log("ChunkSpawn: adding chunk to queue " + newCoords);
     }
 }
 
 [UpdateAfter(typeof(ChunkSpawnSystem))]
 [UpdateBefore(typeof(ChunkBlockGenerationSystem))]
-
 public partial struct FillLoadedChunksSystem : ISystem
 {
     EntityCommandBuffer ECB;
+
     public void OnCreate(ref SystemState state)
     {
-
     }
 
     public void OnUpdate(ref SystemState state)
@@ -184,16 +181,14 @@ public partial struct FillLoadedChunksSystem : ISystem
 
         //find player and their loaded chunks
         //we need to wait for the ECB to finish before we can fill the loaded chunks, that's why this exists instead of adding it inside chunkspawnsystem 
-        foreach (var (settings,loadedChunks, chunkCoords) in
+        foreach (var (settings, loadedChunks, chunkCoords) in
                  SystemAPI.Query<
                      RefRO<PlayerSettings>,
                      DynamicBuffer<PlayerLoadedChunk>,
                      RefRO<EntityChunkCoords>>())
         {
-            
-
-
-            foreach (var (chunk,pending,entity)  in SystemAPI.Query<DOTS_Chunk,LoadedChunksPending>().WithEntityAccess())
+            foreach (var (chunk, pending, entity) in SystemAPI.Query<DOTS_Chunk, LoadedChunksPending>()
+                         .WithEntityAccess())
             {
                 loadedChunks.Add(new PlayerLoadedChunk
                 {
@@ -202,12 +197,7 @@ public partial struct FillLoadedChunksSystem : ISystem
                 });
                 ECB.RemoveComponent<LoadedChunksPending>(entity);
                 ECB.AddComponent<ChunkBlocksPending>(entity);
-
-                
             }
-            
-
         }
-        
     }
 }

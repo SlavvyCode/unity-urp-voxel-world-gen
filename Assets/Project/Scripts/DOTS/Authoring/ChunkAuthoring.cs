@@ -62,14 +62,35 @@ public struct MeshDataRequest
     public NativeArray<Vertex> Vertices;
     public NativeArray<int> Triangles;
     public NativeArray<float2> UVs;
+    
+    // {
+    //     public Entity MeshEntity;
+    //     public int VerticesStart;
+    //     public int VerticesLength;
+    //     public int TrianglesStart;
+    //     public int TrianglesLength;
+    //     public int UVsStart;
+    //     public int UVsLength;
+    // }
+
 }
 
 
+//todo consider adding
+// public enum ChunkState : byte
+// {
+//     Spawning,       // Chunk just created, not filled yet
+//     Loaded,         // Blocks filled
+//     MeshPending,    // Waiting for mesh generation
+//     MeshGenerated,  // Mesh ready
+//     DespawnQueued,  // Should be removed
+// }
 
-public static class MeshUploadQueue
-{
-    public static NativeQueue<MeshDataRequest> Queue = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
-}
+// public struct DOTS_ChunkState : IComponentData
+// {
+//     public ChunkState Value;
+// }
+
 
 
 public struct ChunkBlocksPending : IComponentData
