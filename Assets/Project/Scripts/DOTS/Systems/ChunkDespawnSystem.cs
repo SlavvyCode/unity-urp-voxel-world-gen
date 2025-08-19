@@ -82,7 +82,7 @@ namespace Project.Scripts.DOTS.Systems
                             var entityToDestroy = loadedChunks[j].ChunkEntity;
                             loadedChunks.RemoveAt(j);
                             ecb.DestroyEntity(entityToDestroy);
-                            Debug.Log("Destroyed chunk at: " + despawnChunkCoord);
+                            // Debug.Log("Destroyed chunk at: " + despawnChunkCoord);
                             break; // we found and removed the chunk, no need to continue
                         }
                     }

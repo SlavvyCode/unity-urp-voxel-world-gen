@@ -131,6 +131,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 103295106}
+  - component: {fileID: 103295107}
   m_Layer: 0
   m_Name: WorldGenerator
   m_TagString: Untagged
@@ -153,6 +154,25 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &103295107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 103295105}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b75facd6a3f54bceafcdd2c11c42dab7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  perlinScale: 0.5
+  baseHeight: 0
+  heightVariation: 64
+  terrainRoughness: 0.02
+  randomSeed: 1
+  worldSeed: 0
+  noiseLayers: 4
 --- !u!1 &879442718
 GameObject:
   m_ObjectHideFlags: 0

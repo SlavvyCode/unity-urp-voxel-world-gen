@@ -133,6 +133,10 @@ public partial struct DOTS_SpawnChunksJob : IJobParallelFor
     [ReadOnly] public int RenderDistance;
     public EntityCommandBuffer.ParallelWriter ECB;
     public Entity ChunkPrefabEntity;
+    
+    // todo instead of spawning inside this job, we will spawn them all at once in the main thread 
+    // OR we could try pooling the chunks instead, BUT that might be problematic because of the meshes that would move with the chunks 
+    
 
     public void Execute(int index)
     {
@@ -142,7 +146,7 @@ public partial struct DOTS_SpawnChunksJob : IJobParallelFor
 
         int3 newCoords = PlayerChunkCoord + offset;
 
-        DotsDebugLog("ChunkSpawn at " + newCoords);
+        // DotsDebugLog("ChunkSpawn at " + newCoords);
         // Queue chunk spawn
         Entity chunk = ECB.Instantiate(index, ChunkPrefabEntity);
         // When you do ECB.CreateEntity(index) with an empty command buffer (not from a prefab), the entity starts with no components.
@@ -158,8 +162,6 @@ public partial struct DOTS_SpawnChunksJob : IJobParallelFor
             ChunkCoord = newCoords
         });
         ECB.AddComponent<LoadedChunksPending>(index, chunk);
-        ECB.AddBuffer<DOTS_Block>(index, chunk);
-        // ECB.AddComponent(index, chunk, new DOTS_Chunk{ ChunkCoord = newCoords });
         // Debug.Log("ChunkSpawn: adding chunk to queue " + newCoords);
     }
 }
