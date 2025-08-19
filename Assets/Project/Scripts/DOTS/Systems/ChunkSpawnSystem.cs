@@ -155,9 +155,12 @@ public partial struct DOTS_SpawnChunksJob : IJobParallelFor
                 Rotation = quaternion.identity,
                 Scale = 1f
             });
+            ECB.SetComponent<DOTS_Chunk>(index, chunk, new DOTS_Chunk
+            {
+                ChunkCoord = newCoords
+            });
             ECB.AddComponent<LoadedChunksPending>(index, chunk);
-            // ECB.AddComponent<ChunkMeshPending>(index, chunk);
-            ECB.AddBuffer<DOTS_Block>(index, chunk); // Add this line
+            ECB.AddBuffer<DOTS_Block>(index, chunk); 
             // ECB.AddComponent(index, chunk, new DOTS_Chunk{ ChunkCoord = newCoords });
             // Debug.Log("ChunkSpawn: adding chunk to queue " + newCoords);
     }
@@ -194,7 +197,7 @@ public partial struct FillLoadedChunksSystem : ISystem
             {
                 loadedChunks.Add(new PlayerLoadedChunk
                 {
-                    ChunkCoord = chunkCoords.ValueRO.newChunkCoords,
+                    ChunkCoord = chunk.ChunkCoord,
                     ChunkEntity = entity
                 });
                 ECB.RemoveComponent<LoadedChunksPending>(entity);

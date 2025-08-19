@@ -25,6 +25,7 @@ namespace Project.Scripts.DOTS.Systems
 
         public void OnUpdate(ref SystemState state)
         {
+            
             //considering onyl one player, we will never render for our main player other players' chunks, it's stupid even if multiple players exist
             foreach (var (
                          settings,
@@ -36,13 +37,7 @@ namespace Project.Scripts.DOTS.Systems
                          DynamicBuffer<PlayerLoadedChunk>>())
             {
                 var rendDist = settings.ValueRO.renderDistance;
-                int total = (2 * rendDist + 1) * (2 * rendDist + 1) * (2 * rendDist + 1);
-
-                //works
-                // Debug.Log(loadedChunks.Length + " loaded chunks");
-
-                // var offsets = getLoadedChunkOffsets(total, rendDist);
-
+                
                 for (int i = 0; i < loadedChunks.Length; i++)
                 {
                     int3 chunkCoord = loadedChunks[i].ChunkCoord;
@@ -88,6 +83,7 @@ namespace Project.Scripts.DOTS.Systems
                             loadedChunks.RemoveAt(j);
                             ecb.DestroyEntity(entityToDestroy);
                             Debug.Log("Destroyed chunk at: " + despawnChunkCoord);
+                            break; // we found and removed the chunk, no need to continue
                         }
                     }
                 }
