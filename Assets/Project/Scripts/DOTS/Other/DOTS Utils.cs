@@ -172,6 +172,11 @@ namespace Project.Scripts.DOTS.Other
 
             throw new ArgumentException("Invalid face index");
         }
+        
+        /// <summary>
+        ///  converts 3D chunk coordinates to a 1D index
+        ///  used inside chunks to access blocks in a 1D array
+        /// </summary>
         [BurstCompile]
         public static int ToIndex(int x, int y, int z)
         {
@@ -181,7 +186,7 @@ namespace Project.Scripts.DOTS.Other
         
         
 // Add this attribute to disable Burst for debugging
-        [BurstDiscard]
+        [BurstDiscard] 
         public static void DotsDebugLog(string message)
         {
             Debug.Log(message);

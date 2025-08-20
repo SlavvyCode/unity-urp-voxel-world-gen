@@ -65,8 +65,8 @@ public partial struct ChunkSpawnSystem : ISystem
         // Get ECB system here (managed)
         //run before simulation so that it can be used in parallel jobs
         var ecbSystem = state.World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
-        var ecbParallelWriter = ecbSystem.CreateCommandBuffer().AsParallelWriter();
-
+        var ecb = ecbSystem.CreateCommandBuffer();
+        var ecbParallelWriter = ecb.AsParallelWriter();
 
         foreach (var (
                      settings,
@@ -77,12 +77,12 @@ public partial struct ChunkSpawnSystem : ISystem
                      RefRO<EntityChunkCoords>,
                      DynamicBuffer<PlayerLoadedChunk>>())
         {
-            int r = settings.ValueRO.renderDistance;
-
+            int renderDist = settings.ValueRO.renderDistance;
+            int3 playerChunkCoord = chunkCoord.ValueRO.newChunkCoords;
             //total offsets 
 
             // 4/3πr^3
-            int total = (2 * r + 1) * (2 * r + 1) * (2 * r + 1);
+            int total = (2 * renderDist + 1) * (2 * renderDist + 1) * (2 * renderDist + 1);
             // The sphere radius in chunks is r.
             // A cube containing it has side length 2r + 1 (to include center chunk).
             // The total positions in that cube = (2r+1)^3
@@ -92,79 +92,52 @@ public partial struct ChunkSpawnSystem : ISystem
             // total = new int3[((int)math.ceil(4f / 3f * math.PI * math.pow(r, 3)))];
             NativeArray<int3> offsets = new NativeArray<int3>(total, Allocator.TempJob);
             int idx = 0;
-            for (int x = -r; x <= r; x++)
-            for (int y = -r; y <= r; y++)
-            for (int z = -r; z <= r; z++)
+            for (int x = -renderDist; x <= renderDist; x++)
+            for (int y = -renderDist; y <= renderDist; y++)
+            for (int z = -renderDist; z <= renderDist; z++)
                 offsets[idx++] = new int3(x, y, z);
 
 
-            var job = new DOTS_SpawnChunksJob
+            NativeList<int3> validCoords = new NativeList<int3>(Allocator.Temp);
+
+            for (int x = -renderDist; x <= renderDist; x++)
+            for (int y = -renderDist; y <= renderDist; y++)
+            for (int z = -renderDist; z <= renderDist; z++)
             {
-                Offsets = offsets,
-                PlayerChunkCoord = chunkCoord.ValueRO.newChunkCoords,
-                RenderDistance = r,
-                ECB = ecbParallelWriter,
-                // ECB = ecb.AsParallelWriter(),
-                ChunkPrefabEntity = chunkPrefabEntity,
-            };
+                int3 offset = new int3(x, y, z);
+                if (math.lengthsq(offset.xz) > renderDist * renderDist) // cylinder
+                    continue;
 
+                validCoords.Add(playerChunkCoord + offset);
+            }
 
-            var handle = job.Schedule(total, math.max(1, total / 64), state.Dependency);
-            handle.Complete();
+// batch instantiate
+            NativeArray<Entity> chunks = new NativeArray<Entity>(validCoords.Length, Allocator.Temp);
+            ecb.Instantiate(chunkPrefabEntity, chunks);
 
-            // state.Dependency = JobHandle.CombineDependencies(state.Dependency, handle);
+            for (int i = 0; i < validCoords.Length; i++)
+            {
+                var chunk = chunks[i];
+                ecb.SetComponent(chunk, new LocalTransform
+                {
+                    Position = GetChunkWorldPos(validCoords[i]),
+                    Rotation = quaternion.identity,
+                    Scale = 1f
+                });
+                ecb.SetComponent(chunk, new DOTS_Chunk { ChunkCoord = validCoords[i] });
+                ecb.AddComponent<LoadedChunksPending>(chunk);
+            }
 
+            validCoords.Dispose();
+            chunks.Dispose();
 
-            offsets.Dispose();
+// finally playback
+            // ecb.Playback(state.EntityManager);
+            // ecb.Dispose();
         }
-
-        //for non-system ecb, you need to playback the commands after the job is done
-        // ecb.Playback(state.EntityManager);
-        // ecb.Dispose();
     }
 }
 
-
-[BurstCompile]
-public partial struct DOTS_SpawnChunksJob : IJobParallelFor
-{
-    [ReadOnly] public NativeArray<int3> Offsets;
-    [ReadOnly] public int3 PlayerChunkCoord;
-    [ReadOnly] public int RenderDistance;
-    public EntityCommandBuffer.ParallelWriter ECB;
-    public Entity ChunkPrefabEntity;
-    
-    // todo instead of spawning inside this job, we will spawn them all at once in the main thread 
-    // OR we could try pooling the chunks instead, BUT that might be problematic because of the meshes that would move with the chunks 
-    
-
-    public void Execute(int index)
-    {
-        int3 offset = Offsets[index];
-        if (math.lengthsq(offset) > RenderDistance * RenderDistance)
-            return;
-
-        int3 newCoords = PlayerChunkCoord + offset;
-
-        // DotsDebugLog("ChunkSpawn at " + newCoords);
-        // Queue chunk spawn
-        Entity chunk = ECB.Instantiate(index, ChunkPrefabEntity);
-        // When you do ECB.CreateEntity(index) with an empty command buffer (not from a prefab), the entity starts with no components.
-        //first param is sortkey - determines the order of execution
-        ECB.SetComponent(index, chunk, new LocalTransform
-        {
-            Position = (GetChunkWorldPos(newCoords)),
-            Rotation = quaternion.identity,
-            Scale = 1f
-        });
-        ECB.SetComponent<DOTS_Chunk>(index, chunk, new DOTS_Chunk
-        {
-            ChunkCoord = newCoords
-        });
-        ECB.AddComponent<LoadedChunksPending>(index, chunk);
-        // Debug.Log("ChunkSpawn: adding chunk to queue " + newCoords);
-    }
-}
 
 [UpdateAfter(typeof(ChunkSpawnSystem))]
 [UpdateBefore(typeof(ChunkBlockGenerationSystem))]
