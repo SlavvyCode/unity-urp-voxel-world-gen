@@ -485,8 +485,9 @@ public partial struct MeshGenerationSystem : ISystem
                 // |       |
                 // |       |
                 // v0------v1
-                // Triangle order (0, 2, 1), (1, 2, 3). like the image. this order because it's like ABCD
-                //This preserves clockwise winding order (which tells the GPU which side is the front). If you reverse it, the face might become invisible due to backface culling.
+                // Triangle order (0, 2, 1), (1, 2, 3). like the image. this order because it's like ABCD in geometry class
+                //This preserves clockwise winding order (which tells the GPU which side is the front).
+                //If you reverse it, the face might become invisible due to backface culling.
 
                 // so yeah we just split it up by threes and hope that the triangles were added  correctly. 
 
