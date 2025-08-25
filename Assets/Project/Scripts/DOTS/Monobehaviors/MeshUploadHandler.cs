@@ -67,6 +67,8 @@ public class MeshUploadHandler : MonoBehaviour
             meshUploadRequest.Vertices.Dispose();
             meshUploadRequest.Triangles.Dispose();
             // this.enabled = false;
+            
+            // Debug.Log("meshuploadhandler Ran");
         }
     }
 }

@@ -24,6 +24,3 @@ public class ChunkMeshAuthoring : MonoBehaviour
 
 
 
-public struct ChunkMeshPending : IComponentData
-{
-}

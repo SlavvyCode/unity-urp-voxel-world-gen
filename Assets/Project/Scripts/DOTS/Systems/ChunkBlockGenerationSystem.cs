@@ -16,6 +16,8 @@ using static Project.Scripts.DOTS.Other.DOTS_Utils;
 public partial struct ChunkBlockGenerationSystem : ISystem
 {
     private ComponentLookup<DOTS_Chunk> chunksLookup;
+
+    // private ComponentLookup<DOTS_ChunkState> chunkStateLookup;
     private BufferLookup<DOTS_Block> blocksLookup;
 
 
@@ -24,9 +26,18 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     // - for chunks that are within a certain distance of the player (e.g., some buffer) - eg. a creeper coming up behind you and exploding - for simulations
     // - chunks that are within our FOV
 
+    // IMPORTANT NOTE!
+    // CANNOT BE REFACTORED
+
     // todo cache heightmaps/generated terrain(blocks included)
     // for pillars so we dont have to recalculate them every time a chunk is generated in that pillar
+    private NativeList<Entity> desiredChunks;
 
+    // private NativeList<int2> chunkYColumnCoords;
+    private NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
+    private EntityQuery allChunksQuery;
+
+    private NativeList<int2> chunkXZCoords;
 
     // todo Chunk pooling
     // - Reuse DOTS_Block buffers for chunks that leave the radius instead of reallocating
@@ -34,23 +45,55 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     {
         chunksLookup = SystemAPI.GetComponentLookup<DOTS_Chunk>(true);
         blocksLookup = SystemAPI.GetBufferLookup<DOTS_Block>(false);
+        // chunkStateLookup = SystemAPI.GetComponentLookup<DOTS_ChunkState>(false);
+
+        allChunksQuery = SystemAPI.QueryBuilder()
+            .WithAny<DOTS_ChunkState>()
+            .Build();
+
+
+        desiredChunks = new NativeList<Entity>(Allocator.Persistent);
+    }
+
+    public void OnDestroy(ref SystemState state)
+    {
+        //can not be disposed i think
+        // allChunksQuery.Dispose();
+        if (blockColumnCoordsToHeightHashMap.IsCreated)
+            blockColumnCoordsToHeightHashMap.Dispose();
+        desiredChunks.Dispose();
+
+        if (!chunkXZCoords.IsCreated)
+            chunkXZCoords.Dispose();
+        // chunkYColumnCoords.Dispose();
     }
 
     public void OnUpdate(ref SystemState state)
     {
-        var desiredChunks = SystemAPI.QueryBuilder()
-            .WithAny<ChunkBlocksPending>().Build().ToEntityArray(Allocator.Persistent);
+        #region init uninteresting vars
+
+        desiredChunks.Clear();
+
+        var allChunks =
+            allChunksQuery.ToEntityArray(Allocator
+                .Temp); //remove from desired chunks entities which have chunkstate of different kind than ready forblockgeneration
+        var chunkStates = SystemAPI.GetComponentLookup<DOTS_ChunkState>(true); // read-only
+
+        for (int i = 0; i < allChunks.Length; i++)
+        {
+            var entity = allChunks[i];
+            if (chunkStates[entity].Value == ChunkState.InChunkArr)
+            {
+                desiredChunks.Add(entity);
+            }
+        }
+
 
         if (desiredChunks.Length == 0)
-        {
-            // Debug.Log("No chunks need BLOCK generation");
-            desiredChunks.Dispose();
             return;
-        }
 
         chunksLookup.Update(ref state);
         blocksLookup.Update(ref state);
-
 
         // Debug.Log($"Found {desiredChunks.Length} chunks that need BLOCK generation");
         var worldQuery = SystemAPI.QueryBuilder()
@@ -61,38 +104,51 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
         var ecbSystem = state.World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer();
-        var ecbParallelWriter = ecb.AsParallelWriter();
+        // var ecbParallelWriter = ecb.AsParallelWriter();
 
 
-        ecb.AddComponent<ChunkMeshPending>(desiredChunks);
-        ecb.RemoveComponent<ChunkBlocksPending>(desiredChunks);
-        // make a job which generates blocks for each pillar in the map
+        //todo replace the hashmap to make it faster if that's where the bottleneck is
+        if (!blockColumnCoordsToHeightHashMap.IsCreated)
+            blockColumnCoordsToHeightHashMap =
+                new NativeParallelHashMap<int2, int>(desiredChunks.Length, Allocator.Persistent);
+        else if (blockColumnCoordsToHeightHashMap.Count() < desiredChunks.Length)
+        {
+            blockColumnCoordsToHeightHashMap.Dispose();
+            blockColumnCoordsToHeightHashMap =
+                new NativeParallelHashMap<int2, int>(desiredChunks.Length, Allocator.Persistent);
+        }
+        else blockColumnCoordsToHeightHashMap.Clear(); // safe only if no jobs are scheduled
 
 
-        var allChunkPillarCoords = new NativeList<int2>(Allocator.TempJob);
-        NativeList<int>
-            pillarChunkStartIndices =
-                new NativeList<int>(Allocator.TempJob); // track which pillar belongs to which chunk
+        if (!chunkXZCoords.IsCreated)
+            chunkXZCoords = new NativeList<int2>(Allocator.Persistent);
+        else
+            chunkXZCoords.Clear();
+        //todo can be made much faster with array i think
 
-        // Collect all pillar coordinates (x,z) for the chunks that need block generation
+        #endregion
+
+        // 1. get unique xz block coordinates (x,z) to pass to the heightmap job?
         foreach (var chunkEntity in desiredChunks)
         {
             var chunk = chunksLookup[chunkEntity];
             int3 chunkCoord = chunk.ChunkCoord;
-            int startIndex = allChunkPillarCoords.Length; // index of first pillar for this chunk
-            pillarChunkStartIndices.Add(startIndex);
-            // Add all pillar coordinates for this chunk
-
-            int2 chunkPillarCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
-            allChunkPillarCoords.Add(chunkPillarCoord);
+            // int startIndex = chunkYColumnCoords.Length; // index of first pillar for this chunk
+            int2 chunkColumnXZCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
+            //todo is it okay to just put a temp value? it's certainly faster than making a new variable array and then disposing of  it
+            // we can just change the keys later right?
+            chunkXZCoords.Add(chunkColumnXZCoord);
         }
 
-        //todo don't allocate this every frame
-        NativeArray<int> allXZBlockHeights =
-            new NativeArray<int>(allChunkPillarCoords.Length * CHUNK_SIZE * CHUNK_SIZE, Allocator.Persistent);
-        // flattened heightmaps
 
-        var heightMapBlockPillarJob = new heightMapBlockPillarJob
+        int uniqueXZblockCount = blockColumnCoordsToHeightHashMap.Count();
+        int totalBlocks = uniqueXZblockCount * CHUNK_SIZE * CHUNK_SIZE;
+        int totalUniqueXZChunks = totalBlocks / (CHUNK_SIZE * CHUNK_SIZE);
+
+
+        //2. do heightmap job
+        // todo WHAT DO I NEED TO KNOW TO GENERATE HEIGHT MAP FOR ANY GIVEN BLOCK COLUMN
+        var heightMapForBlockColumnsJob = new heightMapForBlockColumnsJob
         {
             worldSeed = worldParams.worldSeed,
             terrainRoughness = worldParams.terrainRoughness,
@@ -100,73 +156,67 @@ public partial struct ChunkBlockGenerationSystem : ISystem
             heightVariation = worldParams.heightVariation,
             noiseLayers = worldParams.noiseLayers,
 
-            pillars = allChunkPillarCoords.AsArray(),
-            allXZBlockHeights = allXZBlockHeights,
+            chunkXZCoords = chunkXZCoords,
+            coordsToHeightsHashMap = blockColumnCoordsToHeightHashMap.AsParallelWriter()
         };
 
-        var chunkBlockGenerationJob = new ChunkBlockGenerationJob
+        //3 do generation job 
+        // todo WHAT DO I NEED TO HAVE ASSIGN HEIGHTMAPS TO EACH CHUNK
+        // heightmap or heights
+        // each chunk 
+        var generateChunkBlocksJob = new GenerateChunkBlocksJob
         {
-            worldSeed = worldParams.worldSeed,
-            terrainRoughness = worldParams.terrainRoughness,
-            baseHeight = worldParams.baseHeight,
-            heightVariation = worldParams.heightVariation,
-            noiseLayers = worldParams.noiseLayers,
-            // ECB = ecbParallelWriter,
-
             chunksLookup = chunksLookup,
             blocksLookup = blocksLookup,
+            ecb = ecb.AsParallelWriter(),
 
-
-            allChunks = desiredChunks,
-            pillars = allChunkPillarCoords,
-
-            allXZBlockHeights = allXZBlockHeights,
-            pillarChunkStartIndices = pillarChunkStartIndices
+            desiredChunks = desiredChunks,
+            blockColumnCoordsToHeightHashMap = blockColumnCoordsToHeightHashMap,
         };
 
-        int totalBlocks = allChunkPillarCoords.Length * CHUNK_SIZE * CHUNK_SIZE;
-        var handle = heightMapBlockPillarJob.ScheduleParallel(totalBlocks, 1, state.Dependency);
-        handle = chunkBlockGenerationJob.ScheduleParallel(desiredChunks.Length, 1, handle);
-        state.Dependency = handle;
+        var handle = heightMapForBlockColumnsJob.ScheduleParallel(totalUniqueXZChunks, 1, state.Dependency);
+        handle = generateChunkBlocksJob.ScheduleParallel(desiredChunks.Length, 1, handle);
 
+        state.Dependency = handle;
         // pillars.Dispose();
+        handle.Complete(); // MAIN THREAD waits here
+
 
         // ECB.Playback(state.EntityManager);
         // ECB.Dispose();
     }
 }
 
-public partial struct heightMapBlockPillarJob : IJobFor
+public partial struct heightMapForBlockColumnsJob : IJobFor
 {
     public int worldSeed;
     public float terrainRoughness;
     public float baseHeight;
     public float heightVariation;
     public int noiseLayers;
-    [ReadOnly] public NativeArray<int2> pillars; // Array of pillar coordinates (x,z)
+
+    public NativeParallelHashMap<int2, int>.ParallelWriter coordsToHeightsHashMap; // Array of pillar coordinates (x,z)
+    public NativeList<int2> chunkXZCoords;
 
 
-    public NativeArray<int> allXZBlockHeights;
-
-    //do for each block
+    //do for each chunk
     public void Execute(int jobIndex)
     {
+        // get a chunk based on index
         // how many (x,z) samples per pillar
         int xzBlocksPerPillar = CHUNK_SIZE * CHUNK_SIZE;
 
         // figure out which pillar this index belongs to
-        int pillarIndex = jobIndex / xzBlocksPerPillar;
-        int localIndex = jobIndex % xzBlocksPerPillar;
+        // same number of chunks as there is of this job's executes
+        int chunkIndex = jobIndex;
 
-        int localX = localIndex % CHUNK_SIZE;
-        int localZ = localIndex / CHUNK_SIZE;
-
-        int2 pillarCoord = pillars[pillarIndex];
-        int2 blockCoord = new int2(pillarCoord.x + localX, pillarCoord.y + localZ);
-
-        int startIndex = pillarIndex * xzBlocksPerPillar;
-
-        allXZBlockHeights[startIndex + localIndex] = (int)CalculateTerrainHeight(blockCoord.x, blockCoord.y);
+        for (int i = 0; i < CHUNK_SIZE; i++)
+        for (int j = 0; j < CHUNK_SIZE; j++)
+        {
+            int2 columnCoord = chunkXZCoords[jobIndex];
+            int height = (int)CalculateTerrainHeight(columnCoord.x, columnCoord.y);
+            coordsToHeightsHashMap.TryAdd(columnCoord, height);
+        }
     }
 
     float CalculateTerrainHeight(int pillarX, int pillarY)
@@ -201,22 +251,15 @@ public partial struct heightMapBlockPillarJob : IJobFor
     }
 }
 
-public partial struct ChunkBlockGenerationJob : IJobFor
+public partial struct GenerateChunkBlocksJob : IJobFor
 {
-    public int worldSeed;
-    public float terrainRoughness;
-    public float baseHeight;
-    public float heightVariation;
-    public int noiseLayers;
-    [ReadOnly] public NativeArray<Entity> allChunks;
-    [ReadOnly] public NativeArray<int2> pillars;
+    [ReadOnly] public NativeArray<Entity> desiredChunks;
 
-    [ReadOnly] public NativeArray<int> allXZBlockHeights;
-
-    [ReadOnly] public NativeList<int> pillarChunkStartIndices;
+    // [ReadOnly] public NativeArray<int2> chunkYColumnCoords;
     [ReadOnly] public ComponentLookup<DOTS_Chunk> chunksLookup;
     [NativeDisableParallelForRestriction] public BufferLookup<DOTS_Block> blocksLookup;
-
+    [ReadOnly] public NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
+    public EntityCommandBuffer.ParallelWriter ecb;
 
     //todo
     // pillar height depends on render distance (spawned chunks).
@@ -225,78 +268,65 @@ public partial struct ChunkBlockGenerationJob : IJobFor
     // alternatively i coudl disable chunk rendering if they're fully obstructed by another chunk (chunk completely enclosed from all sides.)
     // - but that's a miniscule effect on the CPU right now i think, mostly gpu does that and my game is very gpu light for now still
 
+
+    // EXECUTES ONCE PER EACH CHUNK IN THE RENDER DISTANCE
     public void Execute(int jobIndex)
     {
-        Entity chunkEntity = allChunks[jobIndex];
+        Entity chunkEntity = desiredChunks[jobIndex];
         int3 chunkCoord = chunksLookup[chunkEntity].ChunkCoord;
-        var blocks = blocksLookup[chunkEntity];
+        DynamicBuffer<DOTS_Block> blocks = blocksLookup[chunkEntity];
 
         InitializeChunkBlocks(ref blocks);
 
 
-        // get pillar index by mat
-        var startPillarIndex = pillarChunkStartIndices[jobIndex]; // first pillar index for this chunk;
-        var heightmap = new NativeArray<int>(CHUNK_SIZE * CHUNK_SIZE, Allocator.Temp);
+        //find a way to get all chunks that are in the current chunk column
+// todo???
+        int2 chunkColumnCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
+        int columnHeight;
+        blockColumnCoordsToHeightHashMap.TryGetValue(chunkColumnCoord, out columnHeight);
 
+        int chunkWorldYStart = chunkCoord.y * CHUNK_SIZE;
+        int chunkWorldYEnd = chunkWorldYStart + CHUNK_SIZE;
 
-        int startBlockIndex = startPillarIndex * CHUNK_SIZE * CHUNK_SIZE;
-
+        int stoneStart = int.MinValue;
+        int stoneTop   = math.max(stoneStart, columnHeight - 4);
+        int dirtTop    = math.max(stoneTop, columnHeight - 1);
+        int grassTop   = columnHeight;
+ 
+        // already all Air
         for (int localX = 0; localX < CHUNK_SIZE; localX++)
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
         {
-            int height = allXZBlockHeights[startBlockIndex + localX + localZ * CHUNK_SIZE];
-
-            int stoneStart = 0;
-            // Determine world Y ranges for each material
-            int stoneTop = math.max(stoneStart, height - 4);
-            int dirtTop = math.max(stoneTop, height - 1);
-            int grassTop = height;
-
             int baseWorldY = chunkCoord.y * CHUNK_SIZE;
+
 
             // Stone
             int stoneLocalStart = math.clamp(stoneStart - baseWorldY, 0, CHUNK_SIZE);
-            int stoneLocalEnd = math.clamp(stoneTop - baseWorldY, 0, CHUNK_SIZE);
-
-
-            //todo first check the regular works
-            // if (grassTop < baseWorldY) {
-            //     FillChunk(ref blocks, BlockType.Stone);
-            //     return;
-            // }
-            // if (stoneTop > baseWorldY + CHUNK_SIZE) {
-            //     FillChunk(ref blocks, BlockType.Air);
-            //     return;
-            // }
-            //
-
-
+            int stoneLocalEnd   = math.clamp(stoneTop   - baseWorldY, 0, CHUNK_SIZE);
             for (int y = stoneLocalStart; y < stoneLocalEnd; y++)
                 blocks[ToIndex(localX, y, localZ)] = new DOTS_Block { Value = BlockType.Stone };
 
             // Dirt
             int dirtLocalStart = math.clamp(stoneTop - baseWorldY, 0, CHUNK_SIZE);
-            int dirtLocalEnd = math.clamp(dirtTop - baseWorldY, 0, CHUNK_SIZE);
+            int dirtLocalEnd   = math.clamp(dirtTop  - baseWorldY, 0, CHUNK_SIZE);
             for (int y = dirtLocalStart; y < dirtLocalEnd; y++)
                 blocks[ToIndex(localX, y, localZ)] = new DOTS_Block { Value = BlockType.Dirt };
 
             // Grass
             int grassLocalStart = math.clamp(dirtTop - baseWorldY, 0, CHUNK_SIZE);
-            int grassLocalEnd = math.clamp(grassTop - baseWorldY, 0, CHUNK_SIZE);
+            int grassLocalEnd   = math.clamp(grassTop- baseWorldY, 0, CHUNK_SIZE);
             for (int y = grassLocalStart; y < grassLocalEnd; y++)
                 blocks[ToIndex(localX, y, localZ)] = new DOTS_Block { Value = BlockType.Grass };
-
-            // Air
-            int airLocalStart = math.clamp(grassTop - baseWorldY, 0, CHUNK_SIZE);
-            for (int y = airLocalStart; y < CHUNK_SIZE; y++)
-                blocks[ToIndex(localX, y, localZ)] = new DOTS_Block { Value = BlockType.Air };
         }
-    }
 
-    private void FillChunk(ref DynamicBuffer<DOTS_Block> blocks, BlockType blocktype)
-    {
-        for (int i = 0; i < CHUNK_VOLUME; i++)
-            blocks[i] = new DOTS_Block { Value = blocktype };
+
+
+        // foreach (var chunk in desiredChunks)
+        // {
+        // ecb.SetComponent<DOTS_ChunkState>(chunkEntity, new DOTS_ChunkState { Value = ChunkState.BlocksGenerated });
+
+        ecb.SetComponent(jobIndex, chunkEntity, new DOTS_ChunkState { Value = ChunkState.BlocksGenerated });
+        // }
     }
 
 
@@ -312,155 +342,5 @@ public partial struct ChunkBlockGenerationJob : IJobFor
 
         for (int i = 0; i < CHUNK_VOLUME; i++)
             blocks[i] = new DOTS_Block { Value = BlockType.Air };
-    }
-
-    private void InitializePillarBlocks(NativeArray<Entity> chunks)
-    {
-        for (int i = 0; i < chunks.Length; i++)
-        {
-            var chunkEntity = chunks[i];
-            var blocks = blocksLookup[chunkEntity];
-
-            if (blocks.Length != CHUNK_VOLUME)
-                blocks.ResizeUninitialized(CHUNK_VOLUME);
-
-            for (int j = 0; j < CHUNK_VOLUME; j++)
-                blocks[j] = new DOTS_Block { Value = BlockType.Air };
-        }
-    }
-
-// public partial struct GeneratePerlinBlocksJob : IJobEntity
-// {
-//     public int worldSeed;
-//     public float terrainRoughness;
-//     public float baseHeight;
-//     public float heightVariation;
-//     public int noiseLayers;
-//
-//     public EntityCommandBuffer.ParallelWriter ECB;
-//
-//     //does for each chunk
-//     public void Execute([EntityIndexInQuery] int index, in DOTS_Chunk chunk, ref DynamicBuffer<DOTS_Block> blocks,
-//         Entity entity)
-//     {
-//         // DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
-//
-//         ECB.AddComponent<ChunkMeshPending>(index, entity);
-//         ECB.RemoveComponent<ChunkBlocksPending>(index, entity);
-//
-//
-//         int3 chunkCoord = chunk.ChunkCoord;
-//         InitializeBlocks(ref blocks);
-//
-// // Heightmap for this chunk (X,Z plane)
-//         int[] heightmap = new int[CHUNK_SIZE * CHUNK_SIZE];
-//         
-//         for (int localX = 0; localX < CHUNK_SIZE; localX++)
-//         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
-//         {
-//             int worldX = chunkCoord.x * CHUNK_SIZE + localX;
-//             int worldZ = chunkCoord.z * CHUNK_SIZE + localZ;
-//             int height = (int)CalculateTerrainHeight(worldX, worldZ);
-//             heightmap[localX + localZ * CHUNK_SIZE] = height;
-//         }
-//
-// // Fill blocks using heightmap
-//         for (int localX = 0; localX < CHUNK_SIZE; localX++)
-//         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
-//         {
-//             int height = heightmap[localX + localZ * CHUNK_SIZE];
-//
-//             for (int localY = 0; localY < CHUNK_SIZE; localY++)
-//             {
-//                 int worldY = chunkCoord.y * CHUNK_SIZE + localY;
-//                 int blockIndex = localX + localY * CHUNK_SIZE + localZ * CHUNK_SIZE * CHUNK_SIZE;
-//                 ref var block = ref blocks.ElementAt(blockIndex);
-//
-//                 if (worldY < height)
-//                 {
-//                     if (worldY >= height - 1) block.Value = BlockType.Grass;
-//                     else if (worldY >= height - 4) block.Value = BlockType.Dirt;
-//                     else block.Value = BlockType.Stone;
-//                 }
-//                 else
-//                 {
-//                     block.Value = BlockType.Air;
-//                 }
-//             }
-//         }
-//
-//         // makes the blocks on that x and z have different blocktypes.
-//         // var blockVarietyJob = new BlockVarietyJob();
-//     }
-
-
-    public float CalculateTerrainHeight(int worldX, int worldZ)
-    {
-        //stolen from chunk.cs
-        float perlinScale = terrainRoughness;
-        Vector2 perlinOffset = new Vector2(
-            math.sin(worldSeed * 0.1f) * 1000f,
-            math.cos(worldSeed * 0.1f) * 1000f
-        );
-
-        float sampleX = (worldX + perlinOffset.x) * perlinScale;
-        float sampleZ = (worldZ + perlinOffset.y) * perlinScale;
-
-        float total = 0f;
-        float max = 0f;
-        float amplitude = 1f;
-        float frequency = 1f;
-
-        for (int i = 0; i < noiseLayers; i++)
-        {
-            total += MyPerlin.Noise(sampleX * frequency, sampleZ * frequency) * amplitude;
-            max += amplitude;
-            amplitude *= 0.5f;
-            frequency *= 2f;
-        }
-
-        float normalized = total / max;
-        return baseHeight + (normalized * heightVariation);
-    }
-}
-
-public partial struct TestChunkBlockGenerationJob : IJobEntity
-{
-    public EntityCommandBuffer.ParallelWriter ECB;
-
-    void Execute([EntityIndexInQuery] int sortKey, Entity entity, DynamicBuffer<DOTS_Block> blocks,
-        in DOTS_Chunk chunk, ChunkBlocksPending pending)
-    {
-        // DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
-        blocks.Clear();
-        int blockCount = 0;
-        // Fill first layer with grass
-        for (int x = 0; x < CHUNK_SIZE; x++)
-        for (int y = 0; y < CHUNK_SIZE; y++)
-        for (int z = 0; z < CHUNK_SIZE; z++)
-        {
-            var value = BlockType.Air;
-            if (y == 0)
-            {
-                value = BlockType.Grass;
-            }
-            else if (y == 1)
-            {
-                value = BlockType.Stone;
-            }
-            else if (y == 2)
-            {
-                value = BlockType.Dirt;
-            }
-
-            blockCount++;
-
-            blocks.Add(new DOTS_Block { Value = value });
-        }
-
-        ECB.AddComponent<ChunkMeshPending>(sortKey, entity);
-        ECB.RemoveComponent<ChunkBlocksPending>(sortKey, entity);
-
-        // DotsDebugLog($"Added {blockCount} blocks to chunk at {chunk.ChunkCoord}");
     }
 }

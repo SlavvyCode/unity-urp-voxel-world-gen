@@ -26,6 +26,11 @@ public class ChunkAuthoring : MonoBehaviour
             {
                 MeshEntity = meshEntity
             });
+            
+            AddComponent(entity,new DOTS_ChunkState
+            {
+                Value = ChunkState.NotSpawned
+            });
         }
     }
 }
@@ -48,13 +53,6 @@ public struct DOTS_Chunk : IComponentData
 public struct DOTS_Block : IBufferElementData {
     public BlockType Value;
 }
-//todo sortout
-//apparently nativearray in components is a problem
-// public struct DOTS_Blocks : IComponentData
-// {
-//     public NativeArray<DOTS_Block> Blocks;
-// }
-
 
 public struct MeshDataRequest
 {
@@ -76,28 +74,20 @@ public struct MeshDataRequest
 }
 
 
-//todo consider adding
-// public enum ChunkState : byte
-// {
-//     Spawning,       // Chunk just created, not filled yet
-//     Loaded,         // Blocks filled
-//     MeshPending,    // Waiting for mesh generation
-//     MeshGenerated,  // Mesh ready
-//     DespawnQueued,  // Should be removed
-// }
-
-// public struct DOTS_ChunkState : IComponentData
-// {
-//     public ChunkState Value;
-// }
-
-
-
-public struct ChunkBlocksPending : IComponentData
+//todo no reason to not have it as : byte right?
+public enum ChunkState : byte
 {
-} 
-
-
-public struct LoadedChunksPending : IComponentData
-{
+    NotSpawned,
+    Spawned,       // Chunk just created, not filled yet
+    InChunkArr,         // in chunkArray
+    BlocksGenerated,         // Blocks filled and Waiting for mesh generation
+    MeshGenerated,  // Mesh ready
+    DespawnQueued,  // Should be removed
 }
+
+public struct DOTS_ChunkState : IComponentData
+{
+    public ChunkState Value;
+}
+
+

@@ -52,7 +52,7 @@ namespace Project.Scripts.DOTS.Systems
             }
 
             // Done with this frame’s data, flip buffers
-            MeshUploadQueues.Swap();
+             MeshUploadQueues.Swap();
         }
 
         

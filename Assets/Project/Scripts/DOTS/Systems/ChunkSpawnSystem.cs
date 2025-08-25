@@ -15,15 +15,19 @@ public partial struct ChunkSpawnSystem : ISystem
     // private EntityArchetype chunkPrefabEntityArchetype;
 
     private bool entitiesFound;
+    NativeList<int3> validCoords;
 
 
     public void OnCreate(ref SystemState state)
     {
+        validCoords = new NativeList<int3>(Allocator.Persistent);
     }
 
     public void OnDestroy(ref SystemState state)
     {
+        validCoords.Dispose();
     }
+
 
     // [BurstCompile]
     public void OnUpdate(ref SystemState state)
@@ -97,8 +101,8 @@ public partial struct ChunkSpawnSystem : ISystem
             for (int z = -renderDist; z <= renderDist; z++)
                 offsets[idx++] = new int3(x, y, z);
 
-
-            NativeList<int3> validCoords = new NativeList<int3>(Allocator.Temp);
+            // NativeList<int3> validCoords = new NativeList<int3>(Allocator.Temp);
+            validCoords.Clear();
 
             for (int x = -renderDist; x <= renderDist; x++)
             for (int y = -renderDist; y <= renderDist; y++)
@@ -125,15 +129,10 @@ public partial struct ChunkSpawnSystem : ISystem
                     Scale = 1f
                 });
                 ecb.SetComponent(chunk, new DOTS_Chunk { ChunkCoord = validCoords[i] });
-                ecb.AddComponent<LoadedChunksPending>(chunk);
+                ecb.SetComponent(chunk, new DOTS_ChunkState { Value = ChunkState.Spawned });
             }
 
-            validCoords.Dispose();
             chunks.Dispose();
-
-// finally playback
-            // ecb.Playback(state.EntityManager);
-            // ecb.Dispose();
         }
     }
 }
@@ -162,16 +161,18 @@ public partial struct FillLoadedChunksSystem : ISystem
                      DynamicBuffer<PlayerLoadedChunk>,
                      RefRO<EntityChunkCoords>>())
         {
-            foreach (var (chunk, pending, entity) in SystemAPI.Query<DOTS_Chunk, LoadedChunksPending>()
+            foreach (var (chunk, chunkState, entity) in SystemAPI.Query<DOTS_Chunk, DOTS_ChunkState>()
                          .WithEntityAccess())
             {
-                loadedChunks.Add(new PlayerLoadedChunk
+                if (chunkState.Value == ChunkState.Spawned)
                 {
-                    ChunkCoord = chunk.ChunkCoord,
-                    ChunkEntity = entity
-                });
-                ECB.RemoveComponent<LoadedChunksPending>(entity);
-                ECB.AddComponent<ChunkBlocksPending>(entity);
+                    loadedChunks.Add(new PlayerLoadedChunk
+                    {
+                        ChunkCoord = chunk.ChunkCoord,
+                        ChunkEntity = entity
+                    });
+                    ECB.SetComponent(entity, new DOTS_ChunkState { Value = ChunkState.InChunkArr });
+                }
             }
         }
     }

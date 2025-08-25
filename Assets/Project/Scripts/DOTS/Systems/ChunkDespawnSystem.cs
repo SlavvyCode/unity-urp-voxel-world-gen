@@ -49,7 +49,7 @@ namespace Project.Scripts.DOTS.Systems
                         if (!ChunksToDespawn.Contains(chunkCoord))
                         {
                             ChunksToDespawn.Add(chunkCoord);
-                            Debug.Log("Chunk to despawn added to out of chunk coords: " + chunkCoord);
+                            // Debug.Log("Chunk to despawn added to out of chunk coords: " + chunkCoord);
                         }
                     }
                 }

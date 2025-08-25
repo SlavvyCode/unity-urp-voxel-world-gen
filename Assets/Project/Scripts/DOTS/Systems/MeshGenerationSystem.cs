@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
 
 [BurstCompile]
@@ -32,10 +33,10 @@ public partial struct MeshGenerationSystem : ISystem
     public static int maxChunksPerFrame = 2; // chunks processed per frame
 
     public static JobHandle LastMeshJobHandle;
-    
+
     
     //exists so that i don't create it every frame
-    private EntityQuery desiredChunks; // query for chunks that need mesh generation
+    private EntityQuery renderableChunksQuery; // query for chunks that need mesh generation
     #endregion
     
     public struct MeshSlice
@@ -71,18 +72,19 @@ public partial struct MeshGenerationSystem : ISystem
         
         chunksToGenerateHashSet = new NativeHashSet<Entity>(maxChunks, Allocator.Persistent);
 
+
         
-        
-        desiredChunks = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, ChunkMeshPending>()
+        renderableChunksQuery = SystemAPI.QueryBuilder()
+            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, DOTS_ChunkState>()
             .Build();
         
         
         state.EntityManager.CreateSingleton(new MeshBuffers {
             meshSliceQueue = meshSliceQueue,
             vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent),
-            triangles = new NativeList<int>(Allocator.Persistent),
-            uvs = new NativeList<float2>(Allocator.Persistent)
+            //todo consider nativelist?
+            triangles = new NativeArray<int>(),
+            uvs = new NativeArray<float2>()
         });
 
     }
@@ -106,18 +108,59 @@ public partial struct MeshGenerationSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        
         //return if player doesn't exist and get render distance
         if (!GetPlayerRenderDistance(ref state)) return;
         if (!ChunkMeshesPending(ref state)) return;
         
         chunksToGenerateHashSet.Clear(); // clear the queue at the start of the frame to make sure deleted chunks don't stay in the queue
-        // Collect entities needing meshes.
-        foreach (var (chunk,chunkEntity) 
-                 in SystemAPI.Query<RefRO<DOTS_Chunk>>()
-                     .WithAll<ChunkMeshPending>()
-                     .WithEntityAccess())
-            if (!chunksToGenerateHashSet.Contains(chunkEntity))
-                chunksToGenerateHashSet.Add(chunkEntity);
+
+        
+        int nonAirCount = 0;
+
+        var chunkEntities = renderableChunksQuery.ToEntityArray(Allocator.Temp);
+        var blockLookup = BlockLookup;
+        blockLookup.Update(ref state);
+
+        for (int i = 0; i < chunkEntities.Length; i++)
+        {
+            var entity = chunkEntities[i];
+            var blocks = blockLookup[entity];
+
+            for (int j = 0; j < blocks.Length; j++)
+            {
+                if (blocks[j].Value != BlockType.Air)
+                    nonAirCount++;
+            }
+        }
+
+        Debug.Log($"[MeshGenDebug] Total non-air blocks across all chunks: {nonAirCount}");
+        chunkEntities.Dispose();
+
+        
+        
+        
+        var renderableChunks = SystemAPI.QueryBuilder()
+            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, DOTS_ChunkState>()
+            .Build().ToEntityArray(Allocator.Temp);
+        
+        //remove from desired chunks entities which have chunkstate of different kind than ready forblockgeneration
+        var chunkStates = SystemAPI.GetComponentLookup<DOTS_ChunkState>(true); // read-only
+        chunkStates.Update(ref state);
+
+        for (int i = 0; i < renderableChunks.Length; i++)
+        {
+            var entity = renderableChunks[i];
+            if (chunkStates[entity].Value == ChunkState.BlocksGenerated)
+            {
+                chunksToGenerateHashSet.Add(entity);
+            }
+        }
+
+        
+        Debug.Log("there are " + chunksToGenerateHashSet.Count + " renderable chunks");
+
+        
 
         #region Vars Init and Reset
         BlockLookup.Update(ref state);
@@ -180,11 +223,21 @@ public partial struct MeshGenerationSystem : ISystem
             MeshJobNTimesPerFrame(ref state, chunksThisFrame, ecbParallel);
         }
 
+        int number = 1000000;
+        int nonZeroTris = 0;
+        for (int i = 0; i < math.min(triangles.Length, number); i++)
+        {
+            if (triangles[i] != 0)
+                nonZeroTris++;
+        }
+
+        Debug.Log($"[MeshGenDebug] Non-zero triangles in first {number}: {nonZeroTris} / {math.min(triangles.Length, number)}");
 
 // Only replace fields that can change
         buffers.vertices = vertices;
         buffers.triangles = triangles;
         buffers.uvs = uvs;
+        
 
         
 // queues stay untouched because they were already initialized
@@ -213,8 +266,9 @@ public partial struct MeshGenerationSystem : ISystem
                 jobData[i] = new MeshGenerationJob.MeshGenJobVars()
                 {
                     ChunkEntity = entity,
-                    ChunkData = state.EntityManager.GetComponentData<DOTS_Chunk>(entity),
-                    RenderData = state.EntityManager.GetComponentData<DOTS_ChunkRenderData>(entity)
+                    DotsChunkComponent = state.EntityManager.GetComponentData<DOTS_Chunk>(entity),
+                    RenderData = state.EntityManager.GetComponentData<DOTS_ChunkRenderData>(entity),
+                    ChunkState = state.EntityManager.GetComponentData<DOTS_ChunkState>(entity),
                 };
             }
         }
@@ -255,7 +309,8 @@ public partial struct MeshGenerationSystem : ISystem
         
         mergeHandle.Complete();
         
-        // jobData.Dispose(); doesnt need disposal, it's a allocator.tempjob
+        //todo dispose
+        // jobData.Dispose(); 
         batchSliceQueue.Dispose();
         batchEntityQueue.Dispose();
     }
@@ -286,7 +341,8 @@ public partial struct MeshGenerationSystem : ISystem
 
     private bool ChunkMeshesPending(ref SystemState state)
     {
-        if (desiredChunks.CalculateEntityCount() == 0)
+        
+        if (renderableChunksQuery.CalculateEntityCount() == 0)
         {
             // Debug.LogWarning("No chunks need MESH generation.");
             return false;
@@ -356,19 +412,19 @@ public partial struct MeshGenerationSystem : ISystem
         public struct MeshGenJobVars
         {
             public Entity ChunkEntity;
-            public DOTS_Chunk ChunkData;
+            public DOTS_Chunk DotsChunkComponent;
             public DOTS_ChunkRenderData RenderData;
+            public DOTS_ChunkState ChunkState;
         }
         [ReadOnly] public NativeArray<MeshGenJobVars> meshGenJobVarsArray;
         public void Execute(int index)
         {
             var vars = meshGenJobVarsArray[index];
-            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData, new ChunkMeshPending());
-        }
+            var entity = vars.ChunkEntity;
+            // var  dotsChunk= vars.DotsChunkComponent;
+            var renderData = vars.RenderData;
+            var chunkState = vars.ChunkState;
         
-        void OldEntityExecute([EntityIndexInQuery] int sortKey, in Entity entity, in DOTS_Chunk chunk,
-            in DOTS_ChunkRenderData renderData, in ChunkMeshPending meshPending)
-        {
             DynamicBuffer<DOTS_Block> blocks = BlockLookup[entity];
 
             if (blocks.IsEmpty)
@@ -409,7 +465,7 @@ public partial struct MeshGenerationSystem : ISystem
 
             BatchSliceQueueParallel.Enqueue(meshSlice);
 
-            ecb.RemoveComponent<ChunkMeshPending>(sortKey, entity);
+            chunkState.Value = ChunkState.MeshGenerated;
 
             localVertices.Dispose();
             localTriangles.Dispose();
