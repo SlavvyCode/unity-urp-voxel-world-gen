@@ -102,14 +102,12 @@ public partial struct GeneratePerlinBlocksJob : IJobFor
     [ReadOnly] public NativeList<Entity> desiredChunks;
     [NativeDisableParallelForRestriction] public BufferLookup<DOTS_Block> blockLookup;
     [ReadOnly] public ComponentLookup<DOTS_Chunk> chunkLookup;
-    //todo need to somehow get the following: in DOTS_Chunk chunk, ref DynamicBuffer<DOTS_Block> blocks,Entity entity)
-    
     public void Execute(int index)
     {
 
         var entity = desiredChunks[index];
         var chunk = chunkLookup[entity];
-        DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
+        // DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
         var blocks = blockLookup[entity];
         int3 chunkCoord = chunk.ChunkCoord;
         InitializeBlocks(ref blocks);
