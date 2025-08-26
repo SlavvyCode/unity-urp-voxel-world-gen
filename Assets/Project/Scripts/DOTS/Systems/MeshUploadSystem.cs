@@ -80,22 +80,3 @@ public static class MeshUploadQueues
     }
 }
 
-
-//
-// public static class MeshUploadQueue
-// {
-//     public static NativeQueue<MeshDataRequest> Queue = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
-//
-//     public static void Init()
-//     {
-//         if (!Queue.IsCreated)
-//             Queue = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
-//     }
-//     // i dont think this needs to be disposed, it's just a class, not a dots system
-//     // //destroy on shutdown
-//     // public static void Dispose()
-//     // {
-//     //     if (Queue.IsCreated)
-//     //         Queue.Dispose();
-//     // }
-// }
