@@ -14,23 +14,52 @@ using static Project.Scripts.DOTS.Other.DOTS_Utils;
 [UpdateBefore(typeof(MeshGenerationSystem))]
 public partial struct ChunkBlockGenerationSystem : ISystem
 {
+    
+    public BufferLookup<DOTS_Block> blockLookup;
+    public ComponentLookup<DOTS_Chunk> chunkLookup;
+    private NativeList<Entity> desiredChunks;
+    public void OnCreate(ref SystemState state)
+    { 
+        desiredChunks = new NativeList<Entity>(Allocator.Persistent);
+        chunkLookup = SystemAPI.GetComponentLookup<DOTS_Chunk>(true);
+        blockLookup = SystemAPI.GetBufferLookup<DOTS_Block>(false);
+    }
+
+    public void OnDestroy(ref SystemState state)
+    {
+        desiredChunks.Dispose();
+    }
+
     public void OnUpdate(ref SystemState state)
     {
-        var desiredChunks = SystemAPI.QueryBuilder()
-            .WithAny<ChunkBlocksPending>().Build().ToEntityArray(Allocator.Temp);
+        var allChunks = SystemAPI.QueryBuilder()
+            .WithAny<DOTS_ChunkState>().Build().ToEntityArray(Allocator.Temp);
 
+        desiredChunks.Clear();
+        var chunkStates = SystemAPI.GetComponentLookup<DOTS_ChunkState>(true); // read-only
+
+        for (int i = 0; i < allChunks.Length; i++)
+        {
+            var entity = allChunks[i];
+            if (chunkStates[entity].Value == ChunkStateEnum.BlockGenPending)
+            {
+                desiredChunks.Add(entity);
+            }
+        }
+        
+        
+        
         if (desiredChunks.Length == 0)
         {
             // Debug.Log("No chunks need BLOCK generation");
-            desiredChunks.Dispose();
             return;
         }
+        
+        chunkLookup.Update(ref state);
+        blockLookup.Update(ref state);
         // Debug.Log($"Found {desiredChunks.Length} chunks that need BLOCK generation");
 
 
-        var chunkQuery = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk, ChunkBlocksPending, DOTS_Block>()
-            .Build();
 
         var worldQuery = SystemAPI.QueryBuilder()
             .WithAll<WorldParams>()
@@ -46,9 +75,12 @@ public partial struct ChunkBlockGenerationSystem : ISystem
                 baseHeight = worldParams.baseHeight,
                 heightVariation = worldParams.heightVariation,
                 noiseLayers = worldParams.noiseLayers,
-                ECB = ECB.AsParallelWriter()
+                ECB = ECB.AsParallelWriter(),
+                desiredChunks = desiredChunks,
+                blockLookup = blockLookup,
+                chunkLookup = chunkLookup,
             }
-            .ScheduleParallel(chunkQuery, state.Dependency);
+            .ScheduleParallel(desiredChunks.Length,1, state.Dependency);
 
         state.Dependency.Complete();
 
@@ -58,7 +90,7 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 }
 
 
-public partial struct GeneratePerlinBlocksJob : IJobEntity
+public partial struct GeneratePerlinBlocksJob : IJobFor
 {
     public int worldSeed;
     public float terrainRoughness;
@@ -67,19 +99,22 @@ public partial struct GeneratePerlinBlocksJob : IJobEntity
     public int noiseLayers;
 
     public EntityCommandBuffer.ParallelWriter ECB;
-
-    //does for each chunk
-    public void Execute([EntityIndexInQuery] int index, in DOTS_Chunk chunk, ref DynamicBuffer<DOTS_Block> blocks,
-        Entity entity)
+    [ReadOnly] public NativeList<Entity> desiredChunks;
+    [NativeDisableParallelForRestriction] public BufferLookup<DOTS_Block> blockLookup;
+    [ReadOnly] public ComponentLookup<DOTS_Chunk> chunkLookup;
+    //todo need to somehow get the following: in DOTS_Chunk chunk, ref DynamicBuffer<DOTS_Block> blocks,Entity entity)
+    
+    public void Execute(int index)
     {
+
+        var entity = desiredChunks[index];
+        var chunk = chunkLookup[entity];
         DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
-
-        ECB.AddComponent<ChunkMeshPending>(index, entity);
-        ECB.RemoveComponent<ChunkBlocksPending>(index, entity);
-
-
+        var blocks = blockLookup[entity];
         int3 chunkCoord = chunk.ChunkCoord;
         InitializeBlocks(ref blocks);
+        
+        ECB.SetComponent(index,entity,new DOTS_ChunkState { Value =ChunkStateEnum.MeshPending});
 
 // Heightmap for this chunk (X,Z plane)
         int[] heightmap = new int[CHUNK_SIZE * CHUNK_SIZE];
@@ -169,45 +204,7 @@ public partial struct GeneratePerlinBlocksJob : IJobEntity
         float normalized = total / max;
         return baseHeight + (normalized * heightVariation);
     }
+
+
 }
 
-public partial struct TestChunkBlockGenerationJob : IJobEntity
-{
-    public EntityCommandBuffer.ParallelWriter ECB;
-
-    void Execute([EntityIndexInQuery] int sortKey, Entity entity, DynamicBuffer<DOTS_Block> blocks,
-        in DOTS_Chunk chunk, ChunkBlocksPending pending)
-    {
-        // DotsDebugLog($"Generating blocks for chunk at {chunk.ChunkCoord}");
-        blocks.Clear();
-        int blockCount = 0;
-        // Fill first layer with grass
-        for (int x = 0; x < CHUNK_SIZE; x++)
-        for (int y = 0; y < CHUNK_SIZE; y++)
-        for (int z = 0; z < CHUNK_SIZE; z++)
-        {
-            var value = BlockType.Air;
-            if (y == 0)
-            {
-                value = BlockType.Grass;
-            }
-            else if (y == 1)
-            {
-                value = BlockType.Stone;
-            }
-            else if (y == 2)
-            {
-                value = BlockType.Dirt;
-            }
-
-            blockCount++;
-
-            blocks.Add(new DOTS_Block { Value = value });
-        }
-
-        ECB.AddComponent<ChunkMeshPending>(sortKey, entity);
-        ECB.RemoveComponent<ChunkBlocksPending>(sortKey, entity);
-
-        // DotsDebugLog($"Added {blockCount} blocks to chunk at {chunk.ChunkCoord}");
-    }
-}

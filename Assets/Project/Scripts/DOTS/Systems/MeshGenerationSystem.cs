@@ -35,7 +35,8 @@ public partial struct MeshGenerationSystem : ISystem
     
     
     //exists so that i don't create it every frame
-    private EntityQuery desiredChunks; // query for chunks that need mesh generation
+    private NativeList<Entity> desiredChunks; // query for chunks that need mesh generation
+    private EntityQuery allChunksQuery; // query for chunks that need mesh generation
     #endregion
     
     public struct MeshSlice
@@ -73,10 +74,12 @@ public partial struct MeshGenerationSystem : ISystem
 
         
         
-        desiredChunks = SystemAPI.QueryBuilder()
-            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, ChunkMeshPending>()
+        allChunksQuery = SystemAPI.QueryBuilder()
+            .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, DOTS_ChunkState>()
             .Build();
-        
+
+        desiredChunks = new NativeList<Entity>(Allocator.Persistent);
+
         
         state.EntityManager.CreateSingleton(new MeshBuffers {
             meshSliceQueue = meshSliceQueue,
@@ -101,6 +104,7 @@ public partial struct MeshGenerationSystem : ISystem
         meshSliceQueue.Dispose();
         meshEntityQueue.Dispose();
 
+        desiredChunks.Dispose();
     }
 
     [BurstCompile]
@@ -108,16 +112,29 @@ public partial struct MeshGenerationSystem : ISystem
     {
         //return if player doesn't exist and get render distance
         if (!GetPlayerRenderDistance(ref state)) return;
-        if (!ChunkMeshesPending(ref state)) return;
+
+        var allChunksArray = allChunksQuery.ToEntityArray(Allocator.Temp);
+        desiredChunks.Clear();
         
         chunksToGenerateHashSet.Clear(); // clear the queue at the start of the frame to make sure deleted chunks don't stay in the queue
+        
+        var chunkStates = SystemAPI.GetComponentLookup<DOTS_ChunkState>(true); // read-only
+
+        for (int i = 0; i < allChunksArray.Length; i++)
+        {
+            var entity = allChunksArray[i];
+            if (chunkStates[entity].Value == ChunkStateEnum.MeshPending)
+            {
+                desiredChunks.Add(entity);
+            }
+        }
+        if (!ChunkMeshesPending(ref state)) return;
         // Collect entities needing meshes.
-        foreach (var (chunk,chunkEntity) 
-                 in SystemAPI.Query<RefRO<DOTS_Chunk>>()
-                     .WithAll<ChunkMeshPending>()
-                     .WithEntityAccess())
+        foreach (var chunkEntity in desiredChunks)
+        {
             if (!chunksToGenerateHashSet.Contains(chunkEntity))
                 chunksToGenerateHashSet.Add(chunkEntity);
+        }
 
         #region Vars Init and Reset
         BlockLookup.Update(ref state);
@@ -286,7 +303,7 @@ public partial struct MeshGenerationSystem : ISystem
 
     private bool ChunkMeshesPending(ref SystemState state)
     {
-        if (desiredChunks.CalculateEntityCount() == 0)
+        if (desiredChunks.Length == 0)
         {
             // Debug.LogWarning("No chunks need MESH generation.");
             return false;
@@ -363,11 +380,11 @@ public partial struct MeshGenerationSystem : ISystem
         public void Execute(int index)
         {
             var vars = meshGenJobVarsArray[index];
-            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData, new ChunkMeshPending());
+            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData);
         }
         
         void OldEntityExecute([EntityIndexInQuery] int sortKey, in Entity entity, in DOTS_Chunk chunk,
-            in DOTS_ChunkRenderData renderData, in ChunkMeshPending meshPending)
+            in DOTS_ChunkRenderData renderData)
         {
             DynamicBuffer<DOTS_Block> blocks = BlockLookup[entity];
 
@@ -409,7 +426,8 @@ public partial struct MeshGenerationSystem : ISystem
 
             BatchSliceQueueParallel.Enqueue(meshSlice);
 
-            ecb.RemoveComponent<ChunkMeshPending>(sortKey, entity);
+            ecb.SetComponent(sortKey,entity,new DOTS_ChunkState{Value = ChunkStateEnum.MeshGenerated});
+            // ecb.RemoveComponent<ChunkMeshPending>(sortKey, entity);
 
             localVertices.Dispose();
             localTriangles.Dispose();
