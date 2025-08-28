@@ -3,6 +3,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.VisualScripting;
+using UnityEngine;
 
 namespace Project.Scripts.DOTS.Systems
 {
@@ -20,13 +21,15 @@ namespace Project.Scripts.DOTS.Systems
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<MeshGenerationSystem.MeshBuffers>();
+            MeshUploadQueues.EnsureCreated();
         }
-        
+
+
         public void OnDestroy(ref SystemState state)
         {
-            // if (MeshUploadQueue.Queue.IsCreated)
-                // MeshUploadQueue.Queue.Dispose();
+            MeshUploadQueues.DisposeAll();
         }
+
         public void OnUpdate(ref SystemState state)
         {
             // Make sure jobs that wrote slices are finished
@@ -63,19 +66,56 @@ namespace Project.Scripts.DOTS.Systems
 
 public static class MeshUploadQueues
 {
-    public static NativeQueue<MeshDataRequest> QueueA = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
-    public static NativeQueue<MeshDataRequest> QueueB = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
+    public static NativeQueue<MeshDataRequest> QueueA;
+    public static NativeQueue<MeshDataRequest> QueueB;
 
     public static bool useA = true;
-
     public static JobHandle LastWriteHandle;
 
-    public static NativeQueue<MeshDataRequest> CurrentQueue => useA ? QueueA : QueueB;
-    public static NativeQueue<MeshDataRequest> PreviousQueue => useA ? QueueB : QueueA;
+    public static void EnsureCreated()
+    {
+        if (!QueueA.IsCreated) QueueA = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
+        if (!QueueB.IsCreated) QueueB = new NativeQueue<MeshDataRequest>(Allocator.Persistent);
+    }
+
+    public static void DisposeAll()
+    {
+        if (QueueA.IsCreated)
+        {
+            // make sure no jobs are using it
+            LastWriteHandle.Complete();
+            QueueA.Dispose();
+        }
+        if (QueueB.IsCreated)
+        {
+            LastWriteHandle.Complete();
+            QueueB.Dispose();
+        }
+    }
+
+    public static NativeQueue<MeshDataRequest> CurrentQueue
+    {
+        get
+        {
+            EnsureCreated();
+            return useA ? QueueA : QueueB;
+        }
+    }
+
+    public static NativeQueue<MeshDataRequest> PreviousQueue
+    {
+        get
+        {
+            EnsureCreated();
+            return useA ? QueueB : QueueA;
+        }
+    }
 
     public static void Swap()
     {
-        PreviousQueue.Clear();
+        // clear previous queue safely (ensure it exists)
+        if (PreviousQueue.IsCreated)
+            PreviousQueue.Clear();
         useA = !useA;
     }
 }

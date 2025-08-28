@@ -55,15 +55,6 @@ public partial struct ChunkSpawnSystem : ISystem
             entitiesFound = true;
         }
 
-        EntityManager entityManager = state.EntityManager;
-
-        //ecb non system version:
-        // var ecb = new EntityCommandBuffer(Allocator.TempJob);
-        // var ecbParallelWriter = ecb.AsParallelWriter();
-
-        // ----
-
-
         // ECB system version:
         // Get ECB system here (managed)
         //run before simulation so that it can be used in parallel jobs
@@ -130,6 +121,7 @@ public partial struct ChunkSpawnSystem : ISystem
                 ecb.SetComponent(chunk, new DOTS_ChunkState { Value = ChunkStateEnum.ArrayPending });
             }
 
+            offsets.Dispose();
             chunks.Dispose();
         }
     }

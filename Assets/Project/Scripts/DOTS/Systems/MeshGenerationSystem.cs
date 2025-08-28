@@ -35,7 +35,7 @@ public partial struct MeshGenerationSystem : ISystem
     
     
     //exists so that i don't create it every frame
-    private NativeList<Entity> desiredChunks; // query for chunks that need mesh generation
+    private NativeList<Entity> meshPendingChunks; // query for chunks that need mesh generation
     private EntityQuery allChunksQuery; // query for chunks that need mesh generation
     #endregion
     
@@ -78,7 +78,7 @@ public partial struct MeshGenerationSystem : ISystem
             .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, DOTS_ChunkState>()
             .Build();
 
-        desiredChunks = new NativeList<Entity>(Allocator.Persistent);
+        meshPendingChunks = new NativeList<Entity>(Allocator.Persistent);
 
         
         state.EntityManager.CreateSingleton(new MeshBuffers {
@@ -104,7 +104,7 @@ public partial struct MeshGenerationSystem : ISystem
         meshSliceQueue.Dispose();
         meshEntityQueue.Dispose();
 
-        desiredChunks.Dispose();
+        meshPendingChunks.Dispose();
     }
 
     [BurstCompile]
@@ -114,7 +114,7 @@ public partial struct MeshGenerationSystem : ISystem
         if (!GetPlayerRenderDistance(ref state)) return;
 
         var allChunksArray = allChunksQuery.ToEntityArray(Allocator.Temp);
-        desiredChunks.Clear();
+        meshPendingChunks.Clear();
         
         chunksToGenerateHashSet.Clear(); // clear the queue at the start of the frame to make sure deleted chunks don't stay in the queue
         
@@ -125,12 +125,12 @@ public partial struct MeshGenerationSystem : ISystem
             var entity = allChunksArray[i];
             if (chunkStates[entity].Value == ChunkStateEnum.MeshPending)
             {
-                desiredChunks.Add(entity);
+                meshPendingChunks.Add(entity);
             }
         }
         if (!ChunkMeshesPending(ref state)) return;
         // Collect entities needing meshes.
-        foreach (var chunkEntity in desiredChunks)
+        foreach (var chunkEntity in meshPendingChunks)
         {
             if (!chunksToGenerateHashSet.Contains(chunkEntity))
                 chunksToGenerateHashSet.Add(chunkEntity);
@@ -214,6 +214,7 @@ public partial struct MeshGenerationSystem : ISystem
     {
         var batchSliceQueue = new NativeQueue<MeshSlice>(Allocator.TempJob);
         var batchEntityQueue = new NativeQueue<Entity>(Allocator.TempJob);
+        // todo wait this is burst incompatible isn't it? well who cares i guess maybe i'll sort it out later.
         var jobData = new NativeArray<MeshGenerationJob.MeshGenJobVars>(chunksThisFrame, Allocator.TempJob);
 
         for (int i = 0; i < chunksThisFrame; i++)
@@ -257,9 +258,8 @@ public partial struct MeshGenerationSystem : ISystem
         var meshJobHandle = meshJob.ScheduleParallel(chunksThisFrame, 1, state.Dependency);
         LastMeshJobHandle = meshJobHandle; // store the job handle for later use, e.g. in MeshUploadSystem
         state.Dependency = meshJobHandle; // make future work depend on it        // handle.Complete();
+       
         // Continuation job merges batch queues into global queues after this batch completes
-        
-        // meshJobHandle.Complete();
         var mergeJob = new MergeQueueJob
         {
             BatchSliceQueue = batchSliceQueue,
@@ -272,7 +272,7 @@ public partial struct MeshGenerationSystem : ISystem
         
         mergeHandle.Complete();
         
-        // jobData.Dispose(); doesnt need disposal, it's a allocator.tempjob
+        jobData.Dispose(); 
         batchSliceQueue.Dispose();
         batchEntityQueue.Dispose();
     }
@@ -303,7 +303,7 @@ public partial struct MeshGenerationSystem : ISystem
 
     private bool ChunkMeshesPending(ref SystemState state)
     {
-        if (desiredChunks.Length == 0)
+        if (meshPendingChunks.Length == 0)
         {
             // Debug.LogWarning("No chunks need MESH generation.");
             return false;

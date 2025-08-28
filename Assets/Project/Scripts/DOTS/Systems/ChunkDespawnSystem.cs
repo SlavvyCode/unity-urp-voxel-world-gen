@@ -17,10 +17,12 @@ namespace Project.Scripts.DOTS.Systems
         public void OnCreate(ref SystemState state)
         {
             ChunksToDespawn = new NativeList<int3>(Allocator.Persistent);
-            // ECB = new EntityCommandBuffer(Allocator.Persistent);
-            // state.RequireForUpdate<EndSimulationEntityCommandBufferSystem>();
-            // state.RequireForUpdate<PlayerSettings>();
-            // state.RequireForUpdate<DOTS_Chunk>();
+        }
+
+        public void OnDestroy(ref SystemState state)
+        {
+            if (ChunksToDespawn.IsCreated)
+                ChunksToDespawn.Dispose();
         }
 
         public void OnUpdate(ref SystemState state)
@@ -58,18 +60,17 @@ namespace Project.Scripts.DOTS.Systems
                 var ecbSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
                 var ecb = ecbSystem.CreateCommandBuffer();
 
-                // RemoveChunksOldVer(ref state, loadedChunks, offsets, ecbSystem, ecb);
-
-                //remove chunks new ver:
+                //remove chunks :
                 // pop a few chunks from the despawn queue, 
                 // remove them from  loaded chunks
                 // destroy their entities
 
 
-                //maybe making it a jobi s not worth it since the only thing
+                //maybe making it a jobi s not worth it since the only thing and it's pretty fast
                 //we really do is destroy entities which might get done at the end of the frame automatically in ECB anyway
-                int ChunksToProcessPerFrame = 2;
-                for (int i = 0; i < ChunksToProcessPerFrame && !ChunksToDespawn.IsEmpty; i++)
+                int ChunksToProcessPerFrame = 2000;
+                int smallerNum = math.min(ChunksToProcessPerFrame, ChunksToDespawn.Length);
+                for (int i = 0; i < smallerNum && !ChunksToDespawn.IsEmpty; i++)
                 {
                     var despawnChunkCoord = ChunksToDespawn[0];
                     ChunksToDespawn.RemoveAt(0);
@@ -94,67 +95,6 @@ namespace Project.Scripts.DOTS.Systems
             }
         }
 
-        public void OnDestroy(ref SystemState state)
-        {
-            if (ChunksToDespawn.IsCreated)
-            {
-                ChunksToDespawn.Dispose();
-            }
-            // if (ECB.IsCreated)
-            // {
-            //     ECB.Dispose();
-            // }
-        }
 
-        private void RemoveChunksOldVer(ref SystemState state, DynamicBuffer<PlayerLoadedChunk> loadedChunks,
-            NativeArray<int3> offsets,
-            EndSimulationEntityCommandBufferSystem ecbSystem, EntityCommandBuffer ecb)
-        {
-            // Remove distant chunks
-            var chunksToRemove = new NativeList<int3>(Allocator.TempJob);
-
-// Collect chunk coords to remove
-            for (int i = 0; i < loadedChunks.Length; i++)
-            {
-                if (!offsets.Contains(loadedChunks[i].ChunkCoord))
-                {
-                    chunksToRemove.Add(loadedChunks[i].ChunkCoord);
-                }
-            }
-
-// Remove from loadedChunks buffer by index, iterate backwards to avoid skipping
-            for (int i = loadedChunks.Length - 1; i >= 0; i--)
-            {
-                if (chunksToRemove.Contains(loadedChunks[i].ChunkCoord))
-                {
-                    loadedChunks.RemoveAt(i);
-                }
-            }
-
-            // tells system to wait for jobs to finish before playing back
-            ecbSystem.AddJobHandleForProducer(state.Dependency);
-// Destroy chunk entities
-            foreach (var (chunkData, chunkEntity) in SystemAPI.Query<DOTS_Chunk>().WithEntityAccess())
-            {
-                if (chunksToRemove.Contains(chunkData.ChunkCoord))
-                {
-                    ecb.DestroyEntity(chunkEntity);
-                }
-            }
-
-            chunksToRemove.Dispose();
-            return;
-        }
-
-        private static NativeArray<int3> getLoadedChunkOffsets(int total, int r)
-        {
-            NativeArray<int3> offsets = new NativeArray<int3>(total, Allocator.TempJob);
-            int idx = 0;
-            for (int x = -r; x <= r; x++)
-            for (int y = -r; y <= r; y++)
-            for (int z = -r; z <= r; z++)
-                offsets[idx++] = new int3(x, y, z);
-            return offsets;
-        }
     }
 }
