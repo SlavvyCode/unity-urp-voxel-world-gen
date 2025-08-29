@@ -111,9 +111,10 @@ public partial struct ChunkSpawnSystem : ISystem
             for (int i = 0; i < validCoords.Length; i++)
             {
                 var chunk = chunks[i];
+                GetChunkWorldPos(validCoords[i], out float3 position);
                 ecb.SetComponent(chunk, new LocalTransform
                 {
-                    Position = GetChunkWorldPos(validCoords[i]),
+                    Position = position,
                     Rotation = quaternion.identity,
                     Scale = 1f
                 });

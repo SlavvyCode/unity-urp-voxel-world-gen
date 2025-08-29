@@ -136,107 +136,6 @@ namespace Project.Scripts.DOTS.Other
         #endregion
 
 
-// #region facesOLD
-//         public static class FaceData
-//         {
-//             public static readonly Face[] AllFaces = new Face[6]
-//             {
-//                 // +X (Right)
-//                 new Face(
-//                     new int3(1, 0, 0),
-//                     new float3(1, 0, 0),
-//                     new float3[]
-//                     {
-//                         new float3(1, 0, 0), // v0
-//                         new float3(1, 0, 1), // v1
-//                         new float3(1, 1, 0), // v2
-//                         new float3(1, 1, 1) // v3
-//                     }
-//                 ),
-//
-//                 // -X (Left)
-//                 new Face(
-//                     new int3(-1, 0, 0),
-//                     new float3(-1, 0, 0),
-//                     new float3[]
-//                     {
-//                         new float3(0, 0, 1), // v0
-//                         new float3(0, 0, 0), // v1
-//                         new float3(0, 1, 1), // v2
-//                         new float3(0, 1, 0) // v3
-//                     }
-//                 ),
-//
-//                 // +Y (Top)
-//                 new Face(
-//                     new int3(0, 1, 0),
-//                     new float3(0, 1, 0),
-//                     new float3[]
-//                     {
-//                         new float3(0, 1, 0), // v0
-//                         new float3(1, 1, 0), // v1
-//                         new float3(0, 1, 1), // v2
-//                         new float3(1, 1, 1) // v3
-//                     }
-//                 ),
-//
-//                 // -Y (Bottom)
-//                 new Face(
-//                     new int3(0, -1, 0),
-//                     new float3(0, -1, 0),
-//                     new float3[]
-//                     {
-//                         new float3(1, 0, 0), // v0
-//                         new float3(0, 0, 0), // v1
-//                         new float3(1, 0, 1), // v2
-//                         new float3(0, 0, 1) // v3
-//                     }
-//                 ),
-//
-//                 // +Z (Front)
-//                 new Face(
-//                     new int3(0, 0, 1),
-//                     new float3(0, 0, 1),
-//                     new float3[]
-//                     {
-//                         new float3(1, 0, 1), // v0
-//                         new float3(0, 0, 1), // v1
-//                         new float3(1, 1, 1), // v2
-//                         new float3(0, 1, 1) // v3
-//                     }
-//                 ),
-//
-//                 // -Z (Back)
-//                 new Face(
-//                     new int3(0, 0, -1),
-//                     new float3(0, 0, -1),
-//                     new float3[]
-//                     {
-//                         new float3(0, 0, 0), // v0
-//                         new float3(1, 0, 0), // v1
-//                         new float3(0, 1, 0), // v2
-//                         new float3(1, 1, 0) // v3
-//                     }
-//                 )
-//             };
-//         }
-//
-//         public struct Face
-//         {
-//             public int3 direction;
-//             public float3[] cornerOffsets;
-//             public float3 normal;
-//
-//             public Face(int3 dir, float3 normal, float3[] cornerOffsets)
-//             {
-//                 this.direction = dir;
-//                 this.cornerOffsets = cornerOffsets;
-//                 this.normal = normal;
-//             }
-//         }
-//
-//         # endregion
-
         public const int CHUNK_SIZE = 16;
         public const int CHUNK_VOLUME = 16 * 16 * 16;
 
@@ -249,19 +148,24 @@ namespace Project.Scripts.DOTS.Other
         /*
          * transform world position into the position of the chunk the world position is in in chunk space
          */
-        public static int3 WorldPosToChunkCoord(float3 worldPos, int chunkSize = CHUNK_SIZE)
+        public static void WorldPosToChunkCoord(in float3 worldPos,out int3 result, int chunkSize = CHUNK_SIZE)
         {
-            return new int3(
+            result = new int3(
                 (int)math.floor(worldPos.x / chunkSize),
                 (int)math.floor(worldPos.y / chunkSize),
                 (int)math.floor(worldPos.z / chunkSize)
             );
+            return;
         }
+        //where performance is CRITICAL, replace with
+        //int3 chunkCoord = (int3)math.floor(worldPos / chunkSize);
+        // burst doesn't work well with external helper functions
+
 
         [BurstCompile]
-        public static float3 GetChunkWorldPos(int3 chunkCoords, int chunkSize = CHUNK_SIZE)
+        public static void GetChunkWorldPos(in int3 chunkCoords, out float3 result, int chunkSize = CHUNK_SIZE)
         {
-            return chunkCoords * chunkSize;
+            result = chunkCoords * chunkSize;
         }
 
         [BurstCompile]
@@ -272,7 +176,7 @@ namespace Project.Scripts.DOTS.Other
 
 
         [BurstCompile]
-        public static float2 GetBlockUV(BlockType type, int face)
+        public static void  GetBlockUV(in BlockType type, int face, out float2 result)
         {
             // get the total number of block types in the enum
             // Enum.GetValues() returns an array of all values in the enum.
@@ -288,10 +192,14 @@ namespace Project.Scripts.DOTS.Other
 
             switch (face)
             {
-                case 0: return uvMin + new float2(0f, 0f); // Bottom-left
-                case 1: return uvMin + new float2(tileWidth, 0f); // Bottom-right
-                case 2: return uvMin + new float2(0f, 1f); // Top-left
-                case 3: return uvMin + new float2(tileWidth, 1f); // Top-right
+                case 0: result = uvMin + new float2(0f, 0f); // Bottom-left
+                    return;
+                case 1: result = uvMin + new float2(tileWidth, 0f); // Bottom-right
+                    return;
+                case 2: result = uvMin + new float2(0f, 1f); // Top-left
+                    return;
+                case 3: result = uvMin + new float2(tileWidth, 1f); // Top-right
+                    return;
             }
 
             throw new ArgumentException("Invalid face index");

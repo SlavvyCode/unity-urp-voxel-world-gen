@@ -23,8 +23,9 @@ namespace Project.Scripts.DOTS.Systems
                          .WithAll<NewlySpawnedPlayerTag>()
                          .WithEntityAccess())
             {
-                Debug.Log("PlayerSpawnInitSystem: player spawned at " + WorldPosToChunkCoord(transform.ValueRO.Position));
-                int3 startChunk = WorldPosToChunkCoord(transform.ValueRO.Position);
+                
+                WorldPosToChunkCoord(transform.ValueRO.Position, out int3 startChunk);
+                Debug.Log("PlayerSpawnInitSystem: player spawned at " + startChunk);
 
                 chunkCoord.ValueRW.newChunkCoords = startChunk;
                 chunkCoord.ValueRW.OnChunkChange = true;

@@ -16,9 +16,9 @@ public partial struct MeshGenerationSystem : ISystem
     int maxChunks; // this will be set based on player render distance
 
     private const int INITIAL_SIZE = 1024; // initial size for the buffers
-    private static NativeArray<Vertex> vertices;
-    private static NativeArray<int> triangles;
-    private static NativeArray<float2> uvs;
+    private NativeArray<Vertex> vertices;
+    private NativeArray<int> triangles;
+    private NativeArray<float2> uvs;
     public BufferLookup<DOTS_Block> BlockLookup;
 
     public NativeQueue<MeshSlice> meshSliceQueue;
@@ -483,7 +483,7 @@ public partial struct MeshGenerationSystem : ISystem
                 for (int i = 0; i < 4; i++)
                 {
                     float3 worldPos = new float3(x, y, z) + face.GetCorner(i);
-                    float2 uv = GetBlockUV(blockType, i);
+                    GetBlockUV(blockType, i, out float2 uv);
                     vertices.Add(new Vertex
                     {
                         position = worldPos,

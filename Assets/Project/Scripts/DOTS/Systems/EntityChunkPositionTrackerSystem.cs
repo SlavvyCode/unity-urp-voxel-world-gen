@@ -25,7 +25,7 @@ public partial struct EntityChunkPositionTrackerSystem : ISystem
                      .WithNone<NewlySpawnedPlayerTag>()
                      .WithEntityAccess())
         {
-            int3 newChunk = WorldPosToChunkCoord(transform.ValueRO.Position);
+            WorldPosToChunkCoord(transform.ValueRO.Position, out int3 newChunk);
             
             if (!newChunk.Equals(lastChunkPos.ValueRO.Value))
             {
