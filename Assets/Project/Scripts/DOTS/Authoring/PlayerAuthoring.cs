@@ -7,6 +7,8 @@ using UnityEngine;
 
 public class PlayerAuthoring : MonoBehaviour
 {
+    [Header("DANGER- under some version of chunkGeneration, setting " +
+            "render distance to 0 may NOT generate any chunk whatsoever")]
     public int renderDistance;
     public class Baker : Baker<PlayerAuthoring>
     {
