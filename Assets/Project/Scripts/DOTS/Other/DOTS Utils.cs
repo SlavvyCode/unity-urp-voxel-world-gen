@@ -28,7 +28,7 @@ namespace Project.Scripts.DOTS.Other
                 AllFacesPrivate = new NativeArray<Face>(6, Allocator.Persistent);
 
 
-                // +X
+                // +X (right)
                 AllFacesPrivate[0] = new Face(
                     new int3(1, 0, 0),
                     new float3(1, 0, 0), // normal
@@ -48,7 +48,7 @@ namespace Project.Scripts.DOTS.Other
                     new float3(0, 1, 0)
                 );
 
-                // +Y
+                // +Y AKA TOP
                 AllFacesPrivate[2] = new Face(
                     new int3(0, 1, 0),
                     new float3(0, 1, 0), // normal
@@ -58,34 +58,34 @@ namespace Project.Scripts.DOTS.Other
                     new float3(1, 1, 1)
                 );
 
-                // -Y
+                // -Y (BOT)
                 AllFacesPrivate[3] = new Face(
                     new int3(0, -1, 0),
                     new float3(0, -1, 0), // normal
-                    new float3(0, 0, 1),
-                    new float3(1, 0, 1),
+                    new float3(1, 0, 0),
                     new float3(0, 0, 0),
-                    new float3(1, 0, 0)
+                    new float3(1, 0, 1),
+                    new float3(0, 0, 1)
                 );
 
-                // +Z
+                // +Z AKA FRONT
                 AllFacesPrivate[4] = new Face(
                     new int3(0, 0, 1),
                     new float3(0, 0, 1), // normal
-                    new float3(0, 0, 1),
-                    new float3(0, 1, 1),
                     new float3(1, 0, 1),
-                    new float3(1, 1, 1)
+                    new float3(0, 0, 1),
+                    new float3(1, 1, 1),
+                    new float3(0, 1, 1)
                 );
 
-                // -Z
+                // -Z AKA BACK
                 AllFacesPrivate[5] = new Face(
                     new int3(0, 0, -1),
                     new float3(0, 0, -1), // normal
-                    new float3(1, 0, 0),
                     new float3(0, 0, 0),
-                    new float3(1, 1, 0),
-                    new float3(0, 1, 0)
+                    new float3(1, 0, 0),
+                    new float3(0, 1, 0),
+                    new float3(1, 1, 0)
                 );
 
                 initialized = true;
