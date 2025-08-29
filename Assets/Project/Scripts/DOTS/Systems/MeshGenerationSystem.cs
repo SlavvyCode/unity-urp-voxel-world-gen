@@ -482,7 +482,7 @@ public partial struct MeshGenerationSystem : ISystem
 
                 for (int i = 0; i < 4; i++)
                 {
-                    float3 worldPos = new float3(x, y, z) + face.cornerOffsets[i];
+                    float3 worldPos = new float3(x, y, z) + face.GetCorner(i);
                     float2 uv = GetBlockUV(blockType, i);
                     vertices.Add(new Vertex
                     {

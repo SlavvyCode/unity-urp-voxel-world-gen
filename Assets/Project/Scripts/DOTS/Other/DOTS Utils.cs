@@ -10,107 +10,232 @@ namespace Project.Scripts.DOTS.Other
     [BurstCompile]
     public static class DOTS_Utils
     {
-        #region faces
+        #region facesNew
 
+        [BurstCompile]
         public static class FaceData
         {
-            public static readonly Face[] AllFaces = new Face[6]
+            private static NativeArray<Face> AllFacesPrivate;
+            public static NativeArray<Face>.ReadOnly AllFaces => AllFacesPrivate.AsReadOnly();
+            private static bool initialized;
+
+            //constructor
+            public static void Init()
             {
-                // +X (Right)
-                new Face(
+                if (initialized) return;
+
+
+                AllFacesPrivate = new NativeArray<Face>(6, Allocator.Persistent);
+
+
+                // +X
+                AllFacesPrivate[0] = new Face(
                     new int3(1, 0, 0),
+                    new float3(1, 0, 0), // normal
                     new float3(1, 0, 0),
-                    new float3[]
-                    {
-                        new float3(1, 0, 0), // v0
-                        new float3(1, 0, 1), // v1
-                        new float3(1, 1, 0), // v2
-                        new float3(1, 1, 1) // v3
-                    }
-                ),
+                    new float3(1, 0, 1),
+                    new float3(1, 1, 0),
+                    new float3(1, 1, 1)
+                );
 
-                // -X (Left)
-                new Face(
+                // -X
+                AllFacesPrivate[1] = new Face(
                     new int3(-1, 0, 0),
-                    new float3(-1, 0, 0),
-                    new float3[]
-                    {
-                        new float3(0, 0, 1), // v0
-                        new float3(0, 0, 0), // v1
-                        new float3(0, 1, 1), // v2
-                        new float3(0, 1, 0) // v3
-                    }
-                ),
-
-                // +Y (Top)
-                new Face(
-                    new int3(0, 1, 0),
-                    new float3(0, 1, 0),
-                    new float3[]
-                    {
-                        new float3(0, 1, 0), // v0
-                        new float3(1, 1, 0), // v1
-                        new float3(0, 1, 1), // v2
-                        new float3(1, 1, 1) // v3
-                    }
-                ),
-
-                // -Y (Bottom)
-                new Face(
-                    new int3(0, -1, 0),
-                    new float3(0, -1, 0),
-                    new float3[]
-                    {
-                        new float3(1, 0, 0), // v0
-                        new float3(0, 0, 0), // v1
-                        new float3(1, 0, 1), // v2
-                        new float3(0, 0, 1) // v3
-                    }
-                ),
-
-                // +Z (Front)
-                new Face(
-                    new int3(0, 0, 1),
+                    new float3(-1, 0, 0), // normal
                     new float3(0, 0, 1),
-                    new float3[]
-                    {
-                        new float3(1, 0, 1), // v0
-                        new float3(0, 0, 1), // v1
-                        new float3(1, 1, 1), // v2
-                        new float3(0, 1, 1) // v3
-                    }
-                ),
+                    new float3(0, 0, 0),
+                    new float3(0, 1, 1),
+                    new float3(0, 1, 0)
+                );
 
-                // -Z (Back)
-                new Face(
+                // +Y
+                AllFacesPrivate[2] = new Face(
+                    new int3(0, 1, 0),
+                    new float3(0, 1, 0), // normal
+                    new float3(0, 1, 0),
+                    new float3(1, 1, 0),
+                    new float3(0, 1, 1),
+                    new float3(1, 1, 1)
+                );
+
+                // -Y
+                AllFacesPrivate[3] = new Face(
+                    new int3(0, -1, 0),
+                    new float3(0, -1, 0), // normal
+                    new float3(0, 0, 1),
+                    new float3(1, 0, 1),
+                    new float3(0, 0, 0),
+                    new float3(1, 0, 0)
+                );
+
+                // +Z
+                AllFacesPrivate[4] = new Face(
+                    new int3(0, 0, 1),
+                    new float3(0, 0, 1), // normal
+                    new float3(0, 0, 1),
+                    new float3(0, 1, 1),
+                    new float3(1, 0, 1),
+                    new float3(1, 1, 1)
+                );
+
+                // -Z
+                AllFacesPrivate[5] = new Face(
                     new int3(0, 0, -1),
-                    new float3(0, 0, -1),
-                    new float3[]
-                    {
-                        new float3(0, 0, 0), // v0
-                        new float3(1, 0, 0), // v1
-                        new float3(0, 1, 0), // v2
-                        new float3(1, 1, 0) // v3
-                    }
-                )
-            };
+                    new float3(0, 0, -1), // normal
+                    new float3(1, 0, 0),
+                    new float3(0, 0, 0),
+                    new float3(1, 1, 0),
+                    new float3(0, 1, 0)
+                );
+
+                initialized = true;
+            }
+
+            public static void Dispose()
+            {
+                if (AllFacesPrivate.IsCreated)
+                    AllFacesPrivate.Dispose();
+                initialized = false;
+            }
         }
 
         public struct Face
         {
             public int3 direction;
-            public float3[] cornerOffsets;
             public float3 normal;
 
-            public Face(int3 dir, float3 normal, float3[] cornerOffsets)
+            // fixed-size corner offsets
+            public float3 v0;
+            public float3 v1;
+            public float3 v2;
+            public float3 v3;
+
+            public Face(int3 dir, float3 normal, float3 v0, float3 v1, float3 v2, float3 v3)
             {
                 this.direction = dir;
-                this.cornerOffsets = cornerOffsets;
                 this.normal = normal;
+                this.v0 = v0;
+                this.v1 = v1;
+                this.v2 = v2;
+                this.v3 = v3;
+            }
+
+            public float3 GetCorner(int i)
+            {
+                return i switch
+                {
+                    0 => v0,
+                    1 => v1,
+                    2 => v2,
+                    3 => v3,
+                    _ => throw new System.IndexOutOfRangeException()
+                };
             }
         }
 
-        # endregion
+        #endregion
+
+
+// #region facesOLD
+//         public static class FaceData
+//         {
+//             public static readonly Face[] AllFaces = new Face[6]
+//             {
+//                 // +X (Right)
+//                 new Face(
+//                     new int3(1, 0, 0),
+//                     new float3(1, 0, 0),
+//                     new float3[]
+//                     {
+//                         new float3(1, 0, 0), // v0
+//                         new float3(1, 0, 1), // v1
+//                         new float3(1, 1, 0), // v2
+//                         new float3(1, 1, 1) // v3
+//                     }
+//                 ),
+//
+//                 // -X (Left)
+//                 new Face(
+//                     new int3(-1, 0, 0),
+//                     new float3(-1, 0, 0),
+//                     new float3[]
+//                     {
+//                         new float3(0, 0, 1), // v0
+//                         new float3(0, 0, 0), // v1
+//                         new float3(0, 1, 1), // v2
+//                         new float3(0, 1, 0) // v3
+//                     }
+//                 ),
+//
+//                 // +Y (Top)
+//                 new Face(
+//                     new int3(0, 1, 0),
+//                     new float3(0, 1, 0),
+//                     new float3[]
+//                     {
+//                         new float3(0, 1, 0), // v0
+//                         new float3(1, 1, 0), // v1
+//                         new float3(0, 1, 1), // v2
+//                         new float3(1, 1, 1) // v3
+//                     }
+//                 ),
+//
+//                 // -Y (Bottom)
+//                 new Face(
+//                     new int3(0, -1, 0),
+//                     new float3(0, -1, 0),
+//                     new float3[]
+//                     {
+//                         new float3(1, 0, 0), // v0
+//                         new float3(0, 0, 0), // v1
+//                         new float3(1, 0, 1), // v2
+//                         new float3(0, 0, 1) // v3
+//                     }
+//                 ),
+//
+//                 // +Z (Front)
+//                 new Face(
+//                     new int3(0, 0, 1),
+//                     new float3(0, 0, 1),
+//                     new float3[]
+//                     {
+//                         new float3(1, 0, 1), // v0
+//                         new float3(0, 0, 1), // v1
+//                         new float3(1, 1, 1), // v2
+//                         new float3(0, 1, 1) // v3
+//                     }
+//                 ),
+//
+//                 // -Z (Back)
+//                 new Face(
+//                     new int3(0, 0, -1),
+//                     new float3(0, 0, -1),
+//                     new float3[]
+//                     {
+//                         new float3(0, 0, 0), // v0
+//                         new float3(1, 0, 0), // v1
+//                         new float3(0, 1, 0), // v2
+//                         new float3(1, 1, 0) // v3
+//                     }
+//                 )
+//             };
+//         }
+//
+//         public struct Face
+//         {
+//             public int3 direction;
+//             public float3[] cornerOffsets;
+//             public float3 normal;
+//
+//             public Face(int3 dir, float3 normal, float3[] cornerOffsets)
+//             {
+//                 this.direction = dir;
+//                 this.cornerOffsets = cornerOffsets;
+//                 this.normal = normal;
+//             }
+//         }
+//
+//         # endregion
 
         public const int CHUNK_SIZE = 16;
         public const int CHUNK_VOLUME = 16 * 16 * 16;
@@ -122,7 +247,7 @@ namespace Project.Scripts.DOTS.Other
 
         [BurstCompile]
         /*
-         * transform world position into the position of the chunk the world position is in in chunk space 
+         * transform world position into the position of the chunk the world position is in in chunk space
          */
         public static int3 WorldPosToChunkCoord(float3 worldPos, int chunkSize = CHUNK_SIZE)
         {
@@ -132,6 +257,7 @@ namespace Project.Scripts.DOTS.Other
                 (int)math.floor(worldPos.z / chunkSize)
             );
         }
+
         [BurstCompile]
         public static float3 GetChunkWorldPos(int3 chunkCoords, int chunkSize = CHUNK_SIZE)
         {
@@ -143,11 +269,9 @@ namespace Project.Scripts.DOTS.Other
         {
             return block != BlockType.Air;
         }
-        
-        
-        
-        [BurstCompile]
 
+
+        [BurstCompile]
         public static float2 GetBlockUV(BlockType type, int face)
         {
             // get the total number of block types in the enum
@@ -172,27 +296,28 @@ namespace Project.Scripts.DOTS.Other
 
             throw new ArgumentException("Invalid face index");
         }
+
         [BurstCompile]
         public static int ToIndex(int x, int y, int z)
         {
             return x + CHUNK_SIZE * (y + CHUNK_SIZE * z);
         }
-        
-        
-        
+
+
 // Add this attribute to disable Burst for debugging
         [BurstDiscard]
         public static void DotsDebugLog(string message)
         {
             Debug.Log(message);
         }
-        
+
         public static void DotsDebugLogFormat(string message, object[] args)
         {
             Debug.LogFormat(message, args);
         }
 
-        public static void DotsDebugLogFormat(LogType logType, LogOption logOption, UnityEngine.Object context, string message, params object[] args)
+        public static void DotsDebugLogFormat(LogType logType, LogOption logOption, UnityEngine.Object context,
+            string message, params object[] args)
         {
             if (logType == LogType.Error)
             {
