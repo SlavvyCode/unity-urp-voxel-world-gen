@@ -103,39 +103,27 @@ public class MeshUploadHandler : MonoBehaviour
         int vertCount = request.Vertices.Length;
         int triCount = request.Triangles.Length;
 
-        //set single-stream vertex buffer layout
-        var vertexAttributes = new[]
+        // Set single-stream vertex buffer layout
+
+        mesh.SetVertexBufferParams(vertCount, new[]
         {
-            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
-            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2)
-        };
-        mesh.SetVertexBufferParams(vertCount, vertexAttributes);
+            new VertexAttributeDescriptor(VertexAttribute.Position),
+            new VertexAttributeDescriptor(VertexAttribute.Normal),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord0)
+        });
+        mesh.SetVertexBufferData(request.Vertices, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
         mesh.SetIndexBufferParams(triCount, IndexFormat.UInt32);
 
-        var pos = new Vector3[vertCount];
-        var norm = new Vector3[vertCount];
-        var uv = new Vector2[vertCount];
-        for (int i = 0; i < vertCount; i++)
-        {
-            pos[i] = request.Vertices[i].position;
-            norm[i] = request.Vertices[i].normal;
-            uv[i] = new Vector2(request.UVs[i].x, request.UVs[i].y);
-        }
-
-        mesh.SetVertexBufferData(pos, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
-        mesh.SetVertexBufferData(norm, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
-        mesh.SetVertexBufferData(uv, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
-
+        mesh.SetIndexBufferParams(triCount, IndexFormat.UInt32);
         mesh.SetIndexBufferData(request.Triangles, 0, 0, triCount, MeshUpdateFlags.DontValidateIndices);
 
         mesh.subMeshCount = 1;
-        mesh.SetSubMesh(0, new SubMeshDescriptor(0, triCount, MeshTopology.Triangles),
-            MeshUpdateFlags.DontRecalculateBounds);
-
+        mesh.SetSubMesh(0, new SubMeshDescriptor(0, triCount, MeshTopology.Triangles), MeshUpdateFlags.DontRecalculateBounds);
+        // Assign mesh
         filter.mesh = mesh;
         renderer.enabled = true;
 
+        // Return NativeArrays to dispose
         request.Vertices.Dispose();
         request.Triangles.Dispose();
         request.UVs.Dispose();
