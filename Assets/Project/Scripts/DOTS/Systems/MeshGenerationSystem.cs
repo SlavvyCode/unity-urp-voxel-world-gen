@@ -13,6 +13,7 @@ using static Project.Scripts.DOTS.Other.DOTS_Utils;
 public partial struct MeshGenerationSystem : ISystem
 {
     #region vars
+
     int maxChunks; // this will be set based on player render distance
 
     private const int INITIAL_SIZE = 1024; // initial size for the buffers
@@ -27,19 +28,20 @@ public partial struct MeshGenerationSystem : ISystem
     AtomicCounter vertexCounter;
     AtomicCounter triangleCounter;
     AtomicCounter uvCounter;
-    
+
     //todo hashmap is faster
     private NativeHashSet<Entity> chunksToGenerateHashSet;
     public const int maxChunksPerFrame = 30; // chunks processed per frame
 
     public static JobHandle LastMeshJobHandle;
-    
-    
+
+
     //exists so that i don't create it every frame
     private NativeList<Entity> meshPendingChunks; // query for chunks that need mesh generation
     private EntityQuery allChunksQuery; // query for chunks that need mesh generation
+
     #endregion
-    
+
     public struct MeshSlice
     {
         public Entity MeshEntity; // the entity that this mesh slice belongs to
@@ -47,6 +49,7 @@ public partial struct MeshGenerationSystem : ISystem
         public int TrianglesStart, TrianglesLength;
         public int UVsStart, UVsLength;
     }
+
     public struct MeshBuffers : IComponentData
     {
         public NativeArray<Vertex> vertices;
@@ -56,39 +59,37 @@ public partial struct MeshGenerationSystem : ISystem
     }
 
 
-    
     public void OnCreate(ref SystemState state)
     {
         initializeMeshVars();
         BlockLookup = state.GetBufferLookup<DOTS_Block>(true);
-        
-        
+
+
         vertexCounter = new AtomicCounter(Allocator.Persistent);
         triangleCounter = new AtomicCounter(Allocator.Persistent);
-        uvCounter = new AtomicCounter(Allocator.Persistent); 
-        
-        
+        uvCounter = new AtomicCounter(Allocator.Persistent);
+
+
         meshSliceQueue = new NativeQueue<MeshSlice>(Allocator.Persistent);
         meshEntityQueue = new NativeQueue<Entity>(Allocator.Persistent);
-        
+
         chunksToGenerateHashSet = new NativeHashSet<Entity>(maxChunks, Allocator.Persistent);
 
-        
-        
+
         allChunksQuery = SystemAPI.QueryBuilder()
             .WithAll<DOTS_Chunk, DOTS_ChunkRenderData, DOTS_ChunkState>()
             .Build();
 
         meshPendingChunks = new NativeList<Entity>(Allocator.Persistent);
 
-        
-        state.EntityManager.CreateSingleton(new MeshBuffers {
+
+        state.EntityManager.CreateSingleton(new MeshBuffers
+        {
             meshSliceQueue = meshSliceQueue,
             vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent),
             triangles = new NativeList<int>(Allocator.Persistent),
             uvs = new NativeList<float2>(Allocator.Persistent)
         });
-
     }
 
     public void OnDestroy(ref SystemState state)
@@ -101,14 +102,13 @@ public partial struct MeshGenerationSystem : ISystem
         vertexCounter.Dispose();
         triangleCounter.Dispose();
         uvCounter.Dispose();
-        
+
         meshSliceQueue.Dispose();
         meshEntityQueue.Dispose();
 
         meshPendingChunks.Dispose();
     }
 
-    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         #region Vars Init and Reset
@@ -118,9 +118,10 @@ public partial struct MeshGenerationSystem : ISystem
 
         var allChunksArray = allChunksQuery.ToEntityArray(Allocator.Temp);
         meshPendingChunks.Clear();
-        
-        chunksToGenerateHashSet.Clear(); // clear the queue at the start of the frame to make sure deleted chunks don't stay in the queue
-        
+
+        chunksToGenerateHashSet
+            .Clear(); // clear the queue at the start of the frame to make sure deleted chunks don't stay in the queue
+
         var chunkStates = SystemAPI.GetComponentLookup<DOTS_ChunkState>(true); // read-only
 
         for (int i = 0; i < allChunksArray.Length; i++)
@@ -131,6 +132,7 @@ public partial struct MeshGenerationSystem : ISystem
                 meshPendingChunks.Add(entity);
             }
         }
+
         if (!ChunkMeshesPending(ref state)) return;
         // Collect entities needing meshes.
         foreach (var chunkEntity in meshPendingChunks)
@@ -168,31 +170,30 @@ public partial struct MeshGenerationSystem : ISystem
             triangles = new NativeArray<int>(trisRequiredSize, Allocator.Persistent);
         }
 
-        
+
         //give the messenger entity the buffers
         var messengerEntity = SystemAPI.GetSingletonEntity<MeshBuffers>();
         var buffers = SystemAPI.GetSingleton<MeshBuffers>();
-        
+
         // reset counters
         vertexCounter.Reset();
         triangleCounter.Reset();
         uvCounter.Reset();
-        
+
         // force all jobs that touch meshSliceQueue/meshEntityQueue to finish
         //prevents queueues from being cleared while jobs holding them are still running
-        state.Dependency.Complete();  
+        state.Dependency.Complete();
         meshSliceQueue.Clear();
         meshEntityQueue.Clear();
 
         var ecbParallel = SharedECBSystem.GetParallelECB();
 
-
         #endregion
-        
+
         int chunksThisFrame = math.min(maxChunksPerFrame, chunksToGenerateHashSet.Count);
         if (chunksThisFrame > 0)
         {
-            MeshJobNTimesPerFrame(ref state, chunksThisFrame, ecbParallel);
+            MeshJobNTimesPerFrame(ref state, chunksThisFrame, ecbParallel, FaceData.AllFaces);
         }
 
 
@@ -201,14 +202,15 @@ public partial struct MeshGenerationSystem : ISystem
         buffers.triangles = triangles;
         buffers.uvs = uvs;
 
-        
+
 // queues stay untouched because they were already initialized
         state.EntityManager.SetComponentData(messengerEntity, buffers);
     }
 
 
-
-    private void MeshJobNTimesPerFrame(ref SystemState state, int chunksThisFrame, EntityCommandBuffer.ParallelWriter ecbParallel)
+    [BurstCompile]
+    private void MeshJobNTimesPerFrame(ref SystemState state, int chunksThisFrame,
+        EntityCommandBuffer.ParallelWriter ecbParallel, NativeArray<Face> faces)
     {
         var batchSliceQueue = new NativeQueue<MeshSlice>(Allocator.TempJob);
         var batchEntityQueue = new NativeQueue<Entity>(Allocator.TempJob);
@@ -222,15 +224,16 @@ public partial struct MeshGenerationSystem : ISystem
             if (!chunksToGenerateHashSet.IsEmpty)
             {
                 var enumerator = chunksToGenerateHashSet.GetEnumerator();
-                enumerator.MoveNext();  // move to first element
+                enumerator.MoveNext(); // move to first element
                 var entity = enumerator.Current;
                 chunksToGenerateHashSet.Remove(entity);
-                
+
                 jobData[i] = new MeshGenerationJob.MeshGenJobVars()
                 {
                     ChunkEntity = entity,
                     ChunkData = state.EntityManager.GetComponentData<DOTS_Chunk>(entity),
-                    RenderData = state.EntityManager.GetComponentData<DOTS_ChunkRenderData>(entity)
+                    RenderData = state.EntityManager.GetComponentData<DOTS_ChunkRenderData>(entity),
+                    
                 };
             }
         }
@@ -250,30 +253,31 @@ public partial struct MeshGenerationSystem : ISystem
             BatchSliceQueueParallel = batchSliceQueue.AsParallelWriter(),
 
             ecb = ecbParallel,
-            meshGenJobVarsArray = jobData
-                
+            meshGenJobVarsArray = jobData,
+            faces = faces
         };
         var meshJobHandle = meshJob.ScheduleParallel(chunksThisFrame, 1, state.Dependency);
         LastMeshJobHandle = meshJobHandle; // store the job handle for later use, e.g. in MeshUploadSystem
         state.Dependency = meshJobHandle; // make future work depend on it        // handle.Complete();
-       
+
         // Continuation job merges batch queues into global queues after this batch completes
         var mergeJob = new MergeQueueJob
         {
             BatchSliceQueue = batchSliceQueue,
             GlobalSliceQueue = meshSliceQueue.AsParallelWriter(),
-        };        
+        };
         //todo multithreaded merge job
         var mergeHandle = mergeJob.Schedule(meshJobHandle);
         LastMeshJobHandle = mergeHandle; // store the job handle for later use, e.g. in MeshUploadSystem
         state.Dependency = mergeHandle; // make future work depend on it
-        
+
         mergeHandle.Complete();
-        
-        jobData.Dispose(); 
+
+        jobData.Dispose();
         batchSliceQueue.Dispose();
         batchEntityQueue.Dispose();
     }
+
 // Merge job
     [BurstCompile]
     public struct MergeQueueJob : IJob
@@ -287,11 +291,8 @@ public partial struct MeshGenerationSystem : ISystem
                 GlobalSliceQueue.Enqueue(slice);
         }
     }
-    
-    
-    
-    
-    
+
+
     private void initializeMeshVars()
     {
         vertices = new NativeArray<Vertex>(INITIAL_SIZE, Allocator.Persistent);
@@ -348,7 +349,7 @@ public partial struct MeshGenerationSystem : ISystem
 
 
     [BurstCompile]
-    public partial struct MeshGenerationJob : 
+    public partial struct MeshGenerationJob :
         // IJobEntity
         IJobFor
     {
@@ -363,8 +364,9 @@ public partial struct MeshGenerationSystem : ISystem
         public AtomicCounter UVCounter;
 
         public NativeQueue<MeshSlice>.ParallelWriter BatchSliceQueueParallel;
-        
-        
+
+        [ReadOnly] public NativeArray<Face> faces;
+
         public EntityCommandBuffer.ParallelWriter ecb;
 
         // public struct MeshGenJobVarsThatIUsedToGetFromEntityQuery
@@ -374,22 +376,24 @@ public partial struct MeshGenerationSystem : ISystem
             public DOTS_Chunk ChunkData;
             public DOTS_ChunkRenderData RenderData;
         }
+
         [ReadOnly] public NativeArray<MeshGenJobVars> meshGenJobVarsArray;
+
         public void Execute(int index)
         {
             var vars = meshGenJobVarsArray[index];
-            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData);
+            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData, faces);
         }
-        
+
         void OldEntityExecute([EntityIndexInQuery] int sortKey, in Entity entity, in DOTS_Chunk chunk,
-            in DOTS_ChunkRenderData renderData)
+            in DOTS_ChunkRenderData renderData, NativeArray<Face> faces)
         {
             DynamicBuffer<DOTS_Block> blocks = BlockLookup[entity];
 
             if (blocks.IsEmpty)
                 throw new InvalidOperationException(
                     $"No blocks found for entity {entity}. Ensure the chunk has been initialized with blocks.");
-         
+
 
             // Local temporary storage
             var localVertices = new NativeList<Vertex>(Allocator.Temp);
@@ -424,7 +428,7 @@ public partial struct MeshGenerationSystem : ISystem
 
             BatchSliceQueueParallel.Enqueue(meshSlice);
 
-            ecb.SetComponent(sortKey,entity,new DOTS_ChunkState{Value = ChunkStateEnum.MeshGenerated});
+            ecb.SetComponent(sortKey, entity, new DOTS_ChunkState { Value = ChunkStateEnum.MeshGenerated });
             // ecb.RemoveComponent<ChunkMeshPending>(sortKey, entity);
 
             localVertices.Dispose();
@@ -443,16 +447,16 @@ public partial struct MeshGenerationSystem : ISystem
 
                 if (block.Value != BlockType.Air)
                 {
-                    AddVisibleFacesToBlock(x, y, z, block.Value, blocks, vertices, triangles);
+                    AddVisibleFacesToBlock(x, y, z, block.Value, blocks, vertices, triangles, faces);
                 }
             }
         }
 
 
         public void AddVisibleFacesToBlock(int x, int y, int z, BlockType blockType, DynamicBuffer<DOTS_Block> blocks,
-            NativeList<Vertex> vertices, NativeList<int> triangles)
+            NativeList<Vertex> vertices, NativeList<int> triangles, NativeArray<Face> faces)
         {
-            foreach (var face in FaceData.AllFaces)
+            foreach (var face in faces)
             {
                 //todo backface culling MIGHT not be needed ~ just the fact that the triangles are not faced towards the camera is enough to not render them.
                 // theoretically we could save some small performance by not adding triangles that are not facing the camera in the first place.
@@ -517,6 +521,5 @@ public partial struct MeshGenerationSystem : ISystem
                 triangles.Add(startIndex + 3);
             }
         }
-
     }
 }

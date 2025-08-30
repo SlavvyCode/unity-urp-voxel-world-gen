@@ -1,3 +1,4 @@
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -8,6 +9,7 @@ using UnityEngine;
 namespace Project.Scripts.DOTS.Systems
 {
     [UpdateAfter(typeof(MeshGenerationSystem))]
+    [BurstCompile]
     public partial struct MeshUploadSystem : ISystem
     {
         private MeshGenerationSystem.MeshBuffers buffersFromSingleton;
@@ -24,10 +26,15 @@ namespace Project.Scripts.DOTS.Systems
             MeshUploadQueues.EnsureCreated();
         }
 
-
+        private MeshGenerationSystem.MeshBuffers buffers;
         public void OnDestroy(ref SystemState state)
         {
             MeshUploadQueues.DisposeAll();
+            
+            // these dont need to be disposed, the mesh gen system does it already
+            // if (vertices.IsCreated) vertices.Dispose();
+            // if (triangles.IsCreated) triangles.Dispose();
+            // if (uvs.IsCreated) uvs.Dispose();
         }
 
         public void OnUpdate(ref SystemState state)
@@ -36,11 +43,11 @@ namespace Project.Scripts.DOTS.Systems
             state.Dependency = JobHandle.CombineDependencies(state.Dependency, MeshGenerationSystem.LastMeshJobHandle);
             state.Dependency.Complete();
 
-            var buffers = SystemAPI.GetSingleton<MeshGenerationSystem.MeshBuffers>();
+            buffers = SystemAPI.GetSingleton<MeshGenerationSystem.MeshBuffers>();
 
-            var vertices  = buffers.vertices;
-            var triangles = buffers.triangles;
-            var uvs       = buffers.uvs;
+            vertices  = buffers.vertices;
+            triangles = buffers.triangles;
+            uvs       = buffers.uvs;
 
             // Read from the global slice queue (produced by MergeQueueJob)
             while (buffers.meshSliceQueue.TryDequeue(out var slice))

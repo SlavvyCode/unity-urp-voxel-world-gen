@@ -182,12 +182,9 @@ public partial struct ChunkBlockGenerationSystem : ISystem
         state.Dependency = handle2;
         handle2.Complete();
 
-
-        // ECB.Playback(state.EntityManager);
-        // ECB.Dispose();
     }
 }
-
+[BurstCompile]
 public partial struct heightMapForBlockColumnsJob : IJobFor
 {
     public int worldSeed;
@@ -201,6 +198,7 @@ public partial struct heightMapForBlockColumnsJob : IJobFor
 
 
     //do for each chunk
+    [BurstCompile]
     public void Execute(int jobIndex)
     {
         // get a chunk based on index
@@ -257,7 +255,7 @@ public partial struct heightMapForBlockColumnsJob : IJobFor
         }
     }
 }
-
+[BurstCompile]
 public partial struct GenerateChunkBlocksJob : IJobFor
 {
     [ReadOnly] public NativeArray<Entity> desiredChunks;

@@ -20,6 +20,10 @@ namespace Project.Scripts.DOTS.Systems
         }
         
         
+        // todo research and implement logic using EETS ExclusiveEntityTransactions
+        
+        // as mentioned here https://discussions.unity.com/t/procedural-generation-into-a-separate-world/945718/6
+        // https://chatgpt.com/c/68b2b51d-86a0-832b-9bd4-45b0f8c6162d
         // usage in other systems:
         // var ecb = SharedECBSystem.GetECB();
 

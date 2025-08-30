@@ -5,11 +5,12 @@ using Unity.VisualScripting;
 namespace Project.Scripts.DOTS.Systems
 {
     [UpdateInGroup(typeof(InitializationSystemGroup))]
-    public partial struct CleanUpSystem : ISystem
+    public partial struct InitAndCleanupSystem : ISystem
     {
-        // public void OnCreate(ref SystemState state) { }
-        // public void OnUpdate(ref SystemState state) { }
-        //
+        public void OnCreate(ref SystemState state)
+        {
+            DOTS_Utils.FaceData.Init();
+        }
         public void OnDestroy(ref SystemState state)
         {
             DOTS_Utils.FaceData.Dispose();

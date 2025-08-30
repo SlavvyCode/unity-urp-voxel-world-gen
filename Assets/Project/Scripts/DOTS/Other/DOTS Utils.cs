@@ -15,21 +15,17 @@ namespace Project.Scripts.DOTS.Other
         [BurstCompile]
         public static class FaceData
         {
-            private static NativeArray<Face> AllFacesPrivate;
-            public static NativeArray<Face>.ReadOnly AllFaces => AllFacesPrivate.AsReadOnly();
-            private static bool initialized;
-
+            public static NativeArray<Face> AllFaces;
             //constructor
             public static void Init()
             {
-                if (initialized) return;
+                if (AllFaces.IsCreated) return;
 
+                AllFaces = new NativeArray<Face>(6, Allocator.Persistent);
 
-                AllFacesPrivate = new NativeArray<Face>(6, Allocator.Persistent);
-
-
+                #region new faces() 
                 // +X (right)
-                AllFacesPrivate[0] = new Face(
+                AllFaces[0] = new Face(
                     new int3(1, 0, 0),
                     new float3(1, 0, 0), // normal
                     new float3(1, 0, 0),
@@ -37,9 +33,8 @@ namespace Project.Scripts.DOTS.Other
                     new float3(1, 1, 0),
                     new float3(1, 1, 1)
                 );
-
                 // -X
-                AllFacesPrivate[1] = new Face(
+                AllFaces[1] = new Face(
                     new int3(-1, 0, 0),
                     new float3(-1, 0, 0), // normal
                     new float3(0, 0, 1),
@@ -49,7 +44,7 @@ namespace Project.Scripts.DOTS.Other
                 );
 
                 // +Y AKA TOP
-                AllFacesPrivate[2] = new Face(
+                AllFaces[2] = new Face(
                     new int3(0, 1, 0),
                     new float3(0, 1, 0), // normal
                     new float3(0, 1, 0),
@@ -59,7 +54,7 @@ namespace Project.Scripts.DOTS.Other
                 );
 
                 // -Y (BOT)
-                AllFacesPrivate[3] = new Face(
+                AllFaces[3] = new Face(
                     new int3(0, -1, 0),
                     new float3(0, -1, 0), // normal
                     new float3(1, 0, 0),
@@ -69,7 +64,7 @@ namespace Project.Scripts.DOTS.Other
                 );
 
                 // +Z AKA FRONT
-                AllFacesPrivate[4] = new Face(
+                AllFaces[4] = new Face(
                     new int3(0, 0, 1),
                     new float3(0, 0, 1), // normal
                     new float3(1, 0, 1),
@@ -79,7 +74,7 @@ namespace Project.Scripts.DOTS.Other
                 );
 
                 // -Z AKA BACK
-                AllFacesPrivate[5] = new Face(
+                AllFaces[5] = new Face(
                     new int3(0, 0, -1),
                     new float3(0, 0, -1), // normal
                     new float3(0, 0, 0),
@@ -87,15 +82,16 @@ namespace Project.Scripts.DOTS.Other
                     new float3(0, 1, 0),
                     new float3(1, 1, 0)
                 );
+                #endregion
 
-                initialized = true;
             }
 
             public static void Dispose()
             {
-                if (AllFacesPrivate.IsCreated)
-                    AllFacesPrivate.Dispose();
-                initialized = false;
+                if (AllFaces.IsCreated)
+                    AllFaces.Dispose();
+                if (AllFaces.IsCreated) AllFaces.Dispose();
+                
             }
         }
 
