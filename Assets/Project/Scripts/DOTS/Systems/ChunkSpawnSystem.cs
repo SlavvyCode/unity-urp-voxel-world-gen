@@ -1,3 +1,4 @@
+using Project.Scripts.DOTS.Systems;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -55,21 +56,14 @@ public partial struct ChunkSpawnSystem : ISystem
             entitiesFound = true;
         }
 
-        // ECB system version:
-        // Get ECB system here (managed)
-        //run before simulation so that it can be used in parallel jobs
-        var ecbSystem = state.World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
-        var ecb = ecbSystem.CreateCommandBuffer();
-        var ecbParallelWriter = ecb.AsParallelWriter();
+        var ecb = SharedECBSystem.GetECB();
 
         foreach (var (
                      settings,
-                     chunkCoord,
-                     loadedChunks) in
+                     chunkCoord) in
                  SystemAPI.Query<
                      RefRO<PlayerSettings>,
-                     RefRO<EntityChunkCoords>,
-                     DynamicBuffer<PlayerLoadedChunk>>())
+                     RefRO<EntityChunkCoords>>())
         {
             int renderDist = settings.ValueRO.renderDistance;
             int3 playerChunkCoord = chunkCoord.ValueRO.newChunkCoords;
@@ -132,7 +126,6 @@ public partial struct ChunkSpawnSystem : ISystem
 [UpdateBefore(typeof(ChunkBlockGenerationSystem))]
 public partial struct FillLoadedChunksSystem : ISystem
 {
-    EntityCommandBuffer ECB;
 
     public void OnCreate(ref SystemState state)
     {
@@ -140,15 +133,12 @@ public partial struct FillLoadedChunksSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
-        var ecbSystem = state.World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
-        ECB = ecbSystem.CreateCommandBuffer();
-
+        var ECB = SharedECBSystem.GetECB();
         //find player and their loaded chunks
         //we need to wait for the ECB to finish before we can fill the loaded chunks, that's why this exists instead of adding it inside chunkspawnsystem 
-        foreach (var (settings, loadedChunks, chunkCoords) in
+        foreach (var (settings, chunkCoords) in
                  SystemAPI.Query<
                      RefRO<PlayerSettings>,
-                     DynamicBuffer<PlayerLoadedChunk>,
                      RefRO<EntityChunkCoords>>())
         {
             foreach (var (chunk, chunkState, entity) in SystemAPI.Query<DOTS_Chunk, DOTS_ChunkState>()
@@ -156,11 +146,6 @@ public partial struct FillLoadedChunksSystem : ISystem
             {
                 if (chunkState.Value == ChunkStateEnum.ArrayPending)
                 {
-                    loadedChunks.Add(new PlayerLoadedChunk
-                    {
-                        ChunkCoord = chunk.ChunkCoord,
-                        ChunkEntity = entity
-                    });
                     ECB.SetComponent(entity, new DOTS_ChunkState { Value = ChunkStateEnum.BlockGenPending });
                 }
             }

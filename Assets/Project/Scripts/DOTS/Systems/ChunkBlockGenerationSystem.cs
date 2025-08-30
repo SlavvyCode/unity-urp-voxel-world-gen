@@ -11,7 +11,7 @@ using UnityEngine;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
 
 [BurstCompile]
-[UpdateAfter(typeof(ChunkDespawnSystem))]
+[UpdateAfter(typeof(ChunkDespawnMarkerSystem))]
 [UpdateBefore(typeof(MeshGenerationSystem))]
 public partial struct ChunkBlockGenerationSystem : ISystem
 {
@@ -103,8 +103,7 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
         var worldParams = worldQuery.GetSingleton<WorldParams>();
 
-        var ecbSystem = state.World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
-        var ecb = ecbSystem.CreateCommandBuffer();
+        var ecb = SharedECBSystem.GetECB();
         // var ecbParallelWriter = ecb.AsParallelWriter();
 
 

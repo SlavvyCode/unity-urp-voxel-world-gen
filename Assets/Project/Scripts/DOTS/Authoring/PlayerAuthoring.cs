@@ -23,8 +23,6 @@ public class PlayerAuthoring : MonoBehaviour
             AddComponent<EntityChunkCoords>(entity);
             //singleton
             AddComponent<LastChunkCoords>(entity);
-            //add buffer for loaded chunks
-            AddBuffer<PlayerLoadedChunk>(entity);
             //add newly spawned player tag
             AddComponent<NewlySpawnedPlayerTag>(entity);
         }
@@ -57,11 +55,6 @@ public struct LastChunkCoords : IComponentData
     public int3 Value;
 }
 
-public struct PlayerLoadedChunk : IBufferElementData
-{
-    public int3 ChunkCoord;
-    public Entity ChunkEntity;
-}
 
 
 // used to mark player that just spawned, so we can initialize their chunk coords

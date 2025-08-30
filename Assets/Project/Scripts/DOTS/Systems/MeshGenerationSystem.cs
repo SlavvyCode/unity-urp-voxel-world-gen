@@ -9,7 +9,7 @@ using Unity.Mathematics;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
 
 [BurstCompile]
-[UpdateAfter(typeof(ChunkDespawnSystem))]
+[UpdateAfter(typeof(ChunkDespawnMarkerSystem))]
 public partial struct MeshGenerationSystem : ISystem
 {
     #region vars
@@ -28,8 +28,9 @@ public partial struct MeshGenerationSystem : ISystem
     AtomicCounter triangleCounter;
     AtomicCounter uvCounter;
     
+    //todo hashmap is faster
     private NativeHashSet<Entity> chunksToGenerateHashSet;
-    public static int maxChunksPerFrame = 2; // chunks processed per frame
+    public const int maxChunksPerFrame = 30; // chunks processed per frame
 
     public static JobHandle LastMeshJobHandle;
     
@@ -110,6 +111,8 @@ public partial struct MeshGenerationSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        #region Vars Init and Reset
+
         //return if player doesn't exist and get render distance
         if (!GetPlayerRenderDistance(ref state)) return;
 
@@ -136,7 +139,6 @@ public partial struct MeshGenerationSystem : ISystem
                 chunksToGenerateHashSet.Add(chunkEntity);
         }
 
-        #region Vars Init and Reset
         BlockLookup.Update(ref state);
 
 
@@ -176,18 +178,14 @@ public partial struct MeshGenerationSystem : ISystem
         triangleCounter.Reset();
         uvCounter.Reset();
         
-        // todo meshSliceQueue.Clear() and meshEntityQueue.Clear() may discard slices if job hasn’t finished; clear only after job completion.
-        // or use temporary lists inside jobs???
-        
         // force all jobs that touch meshSliceQueue/meshEntityQueue to finish
         //prevents queueues from being cleared while jobs holding them are still running
         state.Dependency.Complete();  
         meshSliceQueue.Clear();
         meshEntityQueue.Clear();
 
-        var ecbSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
-        var ecb = ecbSystem.CreateCommandBuffer();
-        var ecbParallel = ecb.AsParallelWriter();
+        var ecbParallel = SharedECBSystem.GetParallelECB();
+
 
         #endregion
         
