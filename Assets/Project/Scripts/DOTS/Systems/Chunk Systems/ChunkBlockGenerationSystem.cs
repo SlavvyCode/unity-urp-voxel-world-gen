@@ -41,6 +41,11 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     //ask deepseek deep think mode for acctual architectural improvements it blew my mind with the suggestions 2,3,4
     
     
+   // TODO NEW PLAN about HOW to flatten the hashmap; make a sliding render distance wide and tall 2D array window.
+   // TODO ... in this window, we can recalculate chunks easily and their positions etc etc isntead of finding or passing them hardly or whatever
+    
+    
+    
     // todo cache heightmaps/generated terrain(blocks included)
     // for pillars so we dont have to recalculate them every time a chunk is generated in that pillar
     private NativeList<Entity> desiredChunks;
