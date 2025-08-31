@@ -28,7 +28,19 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
     // IMPORTANT NOTE!
     // CANNOT BE REFACTORED
+    
+    
+    
+    // TODO CONCRETE PLAN TO SPEED UP
+    // TODO
+    // 1. flatten hashmap;
+    // move jobs into individual systems
+    // use shader;
+    // use sorting of chunks (=regions).- seems very insignificant.
 
+    //ask deepseek deep think mode for acctual architectural improvements it blew my mind with the suggestions 2,3,4
+    
+    
     // todo cache heightmaps/generated terrain(blocks included)
     // for pillars so we dont have to recalculate them every time a chunk is generated in that pillar
     private NativeList<Entity> desiredChunks;
@@ -36,7 +48,7 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     // private NativeList<int2> chunkYColumnCoords;
     private NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
     private EntityQuery allChunksQuery;
-
+    private float2 perlinOffset;
     private NativeList<int2> uniqueChunkXZCoords;
 
     // todo Chunk pooling
@@ -53,6 +65,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
 
         desiredChunks = new NativeList<Entity>(Allocator.Persistent);
+
+        perlinOffset = float2.zero;
     }
 
     public void OnDestroy(ref SystemState state)
@@ -145,13 +159,18 @@ public partial struct ChunkBlockGenerationSystem : ISystem
         #endregion
 
 
-
-
+        if (math.all(perlinOffset == float2.zero))
+        {
+            perlinOffset = new float2(
+                math.sin(worldParams.worldSeed * 0.1f) * 1000f,
+                math.cos(worldParams.worldSeed * 0.1f) * 1000f
+            );
+        }
         //2. do heightmap job
         // todo WHAT DO I NEED TO KNOW TO GENERATE HEIGHT MAP FOR ANY GIVEN BLOCK COLUMN
         var heightMapForBlockColumnsJob = new HeightMapForBlockColumnsJob
         {
-            worldSeed = worldParams.worldSeed,
+            perlinOffset = perlinOffset,
             terrainRoughness = worldParams.terrainRoughness,
             baseHeight = worldParams.baseHeight,
             heightVariation = worldParams.heightVariation,
@@ -180,8 +199,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
         // now both jobs are properly chained
         state.Dependency = handle2;
-        handle2.Complete();
-
+        // handle2.Complete();
+        state.Dependency.Complete();
 
         // ECB.Playback(state.EntityManager);
         // ECB.Dispose();
@@ -190,7 +209,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 [BurstCompile]
 public struct HeightMapForBlockColumnsJob : IJobFor
 {
-    public int worldSeed;
+    
+    public float2 perlinOffset;
     public float terrainRoughness;
     public float baseHeight;
     public float heightVariation;
@@ -206,7 +226,6 @@ public struct HeightMapForBlockColumnsJob : IJobFor
     {
         // get a chunk based on index
         // how many (x,z) samples per pillar
-        int xzBlocksPerPillar = CHUNK_SIZE * CHUNK_SIZE;
         int2 chunkColumnCoord = chunkXZCoords[jobIndex];
     
         for (int localX = 0; localX < CHUNK_SIZE; localX++)
@@ -226,10 +245,7 @@ public struct HeightMapForBlockColumnsJob : IJobFor
         {
             //stolen from chunk.cs
             float perlinScale = terrainRoughness;
-            float2 perlinOffset = new float2(
-                math.sin(worldSeed * 0.1f) * 1000f,
-                math.cos(worldSeed * 0.1f) * 1000f
-            );
+
     
             float sampleX = (pillarX + perlinOffset.x) * perlinScale;
             float sampleZ = (pillarY + perlinOffset.y) * perlinScale;

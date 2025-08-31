@@ -108,6 +108,14 @@ public partial struct MeshGenerationSystem : ISystem
         meshPendingChunks.Dispose();
     }
 
+    
+    
+    /// <summary>
+    /// TODO 
+    ///ask deepseek deep think mode for acctual architectural improvements it blew my mind with the suggestions 2,3,4
+    /// </summary>
+    /// <param name="state"></param>
+    
     // [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
