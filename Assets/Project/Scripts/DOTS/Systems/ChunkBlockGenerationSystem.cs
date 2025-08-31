@@ -103,7 +103,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
         var worldParams = worldQuery.GetSingleton<WorldParams>();
 
-        var ecb = SharedECBSystem.GetECB();
+        var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+        var ecb = ECBSystem.CreateCommandBuffer();
         // var ecbParallelWriter = ecb.AsParallelWriter();
 
 
@@ -148,14 +149,13 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
         //2. do heightmap job
         // todo WHAT DO I NEED TO KNOW TO GENERATE HEIGHT MAP FOR ANY GIVEN BLOCK COLUMN
-        var heightMapForBlockColumnsJob = new heightMapForBlockColumnsJob
+        var heightMapForBlockColumnsJob = new HeightMapForBlockColumnsJob
         {
             worldSeed = worldParams.worldSeed,
             terrainRoughness = worldParams.terrainRoughness,
             baseHeight = worldParams.baseHeight,
             heightVariation = worldParams.heightVariation,
             noiseLayers = worldParams.noiseLayers,
-
             chunkXZCoords = uniqueChunkXZCoords,
             coordsToHeightsHashMap = blockColumnCoordsToHeightHashMap.AsParallelWriter()
         };
@@ -187,8 +187,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
         // ECB.Dispose();
     }
 }
-
-public partial struct heightMapForBlockColumnsJob : IJobFor
+[BurstCompile]
+public struct HeightMapForBlockColumnsJob : IJobFor
 {
     public int worldSeed;
     public float terrainRoughness;
@@ -199,30 +199,25 @@ public partial struct heightMapForBlockColumnsJob : IJobFor
     public NativeParallelHashMap<int2, int>.ParallelWriter coordsToHeightsHashMap; // Array of pillar coordinates (x,z)
     [ReadOnly] public NativeList<int2> chunkXZCoords;
 
-
+    
     //do for each chunk
+    [BurstCompile]
     public void Execute(int jobIndex)
     {
         // get a chunk based on index
         // how many (x,z) samples per pillar
         int xzBlocksPerPillar = CHUNK_SIZE * CHUNK_SIZE;
-
-        // figure out which pillar this index belongs to
-        // same number of chunks as there is of this job's executes
-        // int chunkIndex = jobIndex;
-
         int2 chunkColumnCoord = chunkXZCoords[jobIndex];
-
+    
         for (int localX = 0; localX < CHUNK_SIZE; localX++)
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
         {
             // compute world x,z coordinates
             int2 worldColumn = new int2(chunkColumnCoord.x + localX, chunkColumnCoord.y + localZ);
-
+    
             int height = (int)CalculateTerrainHeight(worldColumn.x, worldColumn.y);
             coordsToHeightsHashMap.TryAdd(worldColumn, height);
             // DotsDebugLog("height added " + height);
-            
         }
     }
 
@@ -235,15 +230,15 @@ public partial struct heightMapForBlockColumnsJob : IJobFor
                 math.sin(worldSeed * 0.1f) * 1000f,
                 math.cos(worldSeed * 0.1f) * 1000f
             );
-
+    
             float sampleX = (pillarX + perlinOffset.x) * perlinScale;
             float sampleZ = (pillarY + perlinOffset.y) * perlinScale;
-
+    
             float total = 0f;
             float max = 0f;
             float amplitude = 1f;
             float frequency = 1f;
-
+    
             for (int i = 0; i < noiseLayers; i++)
             {
                 total += MyPerlin.Noise(sampleX * frequency, sampleZ * frequency) * amplitude;
@@ -251,14 +246,14 @@ public partial struct heightMapForBlockColumnsJob : IJobFor
                 amplitude *= 0.5f;
                 frequency *= 2f;
             }
-
+    
             float normalized = total / max;
             return baseHeight + (normalized * heightVariation);
         }
     }
 }
-
-public partial struct GenerateChunkBlocksJob : IJobFor
+[BurstCompile(CompileSynchronously = true)]
+public struct GenerateChunkBlocksJob : IJobFor
 {
     [ReadOnly] public NativeArray<Entity> desiredChunks;
 
@@ -277,6 +272,7 @@ public partial struct GenerateChunkBlocksJob : IJobFor
 
 
     // EXECUTES ONCE PER EACH CHUNK IN THE RENDER DISTANCE
+    [BurstCompile]
     public void Execute(int jobIndex)
     {
         Entity chunkEntity = desiredChunks[jobIndex];

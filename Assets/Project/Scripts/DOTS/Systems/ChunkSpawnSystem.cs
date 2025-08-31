@@ -56,8 +56,8 @@ public partial struct ChunkSpawnSystem : ISystem
             entitiesFound = true;
         }
 
-        var ecb = SharedECBSystem.GetECB();
-
+        var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+        var ecb = ECBSystem.CreateCommandBuffer();
         foreach (var (
                      settings,
                      chunkCoord) in
@@ -133,7 +133,8 @@ public partial struct FillLoadedChunksSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
-        var ECB = SharedECBSystem.GetECB();
+        var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+        var ECB = ECBSystem.CreateCommandBuffer();
         //find player and their loaded chunks
         //we need to wait for the ECB to finish before we can fill the loaded chunks, that's why this exists instead of adding it inside chunkspawnsystem 
         foreach (var (settings, chunkCoords) in

@@ -108,7 +108,7 @@ public partial struct MeshGenerationSystem : ISystem
         meshPendingChunks.Dispose();
     }
 
-    [BurstCompile]
+    // [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         #region Vars Init and Reset
@@ -184,7 +184,9 @@ public partial struct MeshGenerationSystem : ISystem
         meshSliceQueue.Clear();
         meshEntityQueue.Clear();
 
-        var ecbParallel = SharedECBSystem.GetParallelECB();
+     
+        var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+        var ecbParallel = ECBSystem.CreateCommandBuffer().AsParallelWriter();
 
 
         #endregion
@@ -250,7 +252,9 @@ public partial struct MeshGenerationSystem : ISystem
             BatchSliceQueueParallel = batchSliceQueue.AsParallelWriter(),
 
             ecb = ecbParallel,
-            meshGenJobVarsArray = jobData
+            meshGenJobVarsArray = jobData,
+            
+            faceBlob = InitializerSystem.faceBlob
                 
         };
         var meshJobHandle = meshJob.ScheduleParallel(chunksThisFrame, 1, state.Dependency);
@@ -354,6 +358,7 @@ public partial struct MeshGenerationSystem : ISystem
     {
         [ReadOnly] public BufferLookup<DOTS_Block> BlockLookup;
 
+        [ReadOnly] public BlobAssetReference<FaceBlob> faceBlob;
         [NativeDisableParallelForRestriction] public NativeArray<Vertex> Vertices;
         [NativeDisableParallelForRestriction] public NativeArray<int> Triangles;
         [NativeDisableParallelForRestriction] public NativeArray<float2> UVs;
@@ -375,15 +380,12 @@ public partial struct MeshGenerationSystem : ISystem
             public DOTS_ChunkRenderData RenderData;
         }
         [ReadOnly] public NativeArray<MeshGenJobVars> meshGenJobVarsArray;
-        public void Execute(int index)
+        public void Execute(int sortKey)
         {
-            var vars = meshGenJobVarsArray[index];
-            OldEntityExecute(index, vars.ChunkEntity, vars.ChunkData, vars.RenderData);
-        }
-        
-        void OldEntityExecute([EntityIndexInQuery] int sortKey, in Entity entity, in DOTS_Chunk chunk,
-            in DOTS_ChunkRenderData renderData)
-        {
+            var vars = meshGenJobVarsArray[sortKey];
+            var entity = vars.ChunkEntity; 
+            var renderData = vars.RenderData;
+            
             DynamicBuffer<DOTS_Block> blocks = BlockLookup[entity];
 
             if (blocks.IsEmpty)
@@ -452,8 +454,10 @@ public partial struct MeshGenerationSystem : ISystem
         public void AddVisibleFacesToBlock(int x, int y, int z, BlockType blockType, DynamicBuffer<DOTS_Block> blocks,
             NativeList<Vertex> vertices, NativeList<int> triangles)
         {
-            foreach (var face in FaceData.AllFaces)
+            // foreach (var face in FaceData.AllFaces)
+            for (int i = 0; i < faceBlob.Value.Faces.Length; i++)
             {
+                var face = faceBlob.Value.Faces[i];
                 //todo backface culling MIGHT not be needed ~ just the fact that the triangles are not faced towards the camera is enough to not render them.
                 // theoretically we could save some small performance by not adding triangles that are not facing the camera in the first place.
 
@@ -478,10 +482,10 @@ public partial struct MeshGenerationSystem : ISystem
                 // Add 4 vertices for the face
                 int startIndex = vertices.Length;
 
-                for (int i = 0; i < 4; i++)
+                for (int j = 0; j < 4; j++)
                 {
-                    float3 worldPos = new float3(x, y, z) + face.GetCorner(i);
-                    GetBlockUV(blockType, i, out float2 uv);
+                    float3 worldPos = new float3(x, y, z) + face.GetCorner(j);
+                    GetBlockUV(blockType, j, out float2 uv);
                     vertices.Add(new Vertex
                     {
                         position = worldPos,
@@ -489,7 +493,6 @@ public partial struct MeshGenerationSystem : ISystem
                         uv = uv
                     });
                 }
-
                 # region explanation
 
                 // basically:

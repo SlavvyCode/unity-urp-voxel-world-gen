@@ -13,7 +13,9 @@ namespace Project.Scripts.DOTS.Systems
     {
         public void OnUpdate(ref SystemState state)
         {
-            var ecb = SharedECBSystem.GetECB();
+
+            var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+            var ecb = ECBSystem.CreateCommandBuffer();
             Queue<Entity> playersToRemoveTag = new Queue<Entity>();
 
             foreach (var (transform, chunkCoord, lastChunkCoord, entity) in 
@@ -38,7 +40,7 @@ namespace Project.Scripts.DOTS.Systems
                 ecb.RemoveComponent<NewlySpawnedPlayerTag>(playerEntity);
             }
 
-            SharedECBSystem.ECBSystem.AddJobHandleForProducer(state.Dependency);
+            ECBSystem.AddJobHandleForProducer(state.Dependency);
         }
     }
 }

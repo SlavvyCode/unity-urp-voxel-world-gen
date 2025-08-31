@@ -10,7 +10,50 @@ namespace Project.Scripts.DOTS.Other
     [BurstCompile]
     public static class DOTS_Utils
     {
-        #region facesNew
+            public struct FaceBlob
+            {
+                public BlobArray<Face> Faces;
+            }
+
+        #region face
+
+        public struct Face
+        {
+            public int3 direction;
+            public float3 normal;
+
+            // fixed-size corner offsets
+            public float3 v0;
+            public float3 v1;
+            public float3 v2;
+            public float3 v3;
+
+            public Face(int3 dir, float3 normal, float3 v0, float3 v1, float3 v2, float3 v3)
+            {
+                this.direction = dir;
+                this.normal = normal;
+                this.v0 = v0;
+                this.v1 = v1;
+                this.v2 = v2;
+                this.v3 = v3;
+            }
+
+            public float3 GetCorner(int i)
+            {
+                return i switch
+                {
+                    0 => v0,
+                    1 => v1,
+                    2 => v2,
+                    3 => v3,
+                    _ => throw new System.IndexOutOfRangeException()
+                };
+            }
+        }
+
+        #endregion
+
+        #region facesOOLD AND BAAD
 
         [BurstCompile]
         public static class FaceData
@@ -99,40 +142,6 @@ namespace Project.Scripts.DOTS.Other
             }
         }
 
-        public struct Face
-        {
-            public int3 direction;
-            public float3 normal;
-
-            // fixed-size corner offsets
-            public float3 v0;
-            public float3 v1;
-            public float3 v2;
-            public float3 v3;
-
-            public Face(int3 dir, float3 normal, float3 v0, float3 v1, float3 v2, float3 v3)
-            {
-                this.direction = dir;
-                this.normal = normal;
-                this.v0 = v0;
-                this.v1 = v1;
-                this.v2 = v2;
-                this.v3 = v3;
-            }
-
-            public float3 GetCorner(int i)
-            {
-                return i switch
-                {
-                    0 => v0,
-                    1 => v1,
-                    2 => v2,
-                    3 => v3,
-                    _ => throw new System.IndexOutOfRangeException()
-                };
-            }
-        }
-
         #endregion
 
 
@@ -148,7 +157,7 @@ namespace Project.Scripts.DOTS.Other
         /*
          * transform world position into the position of the chunk the world position is in in chunk space
          */
-        public static void WorldPosToChunkCoord(in float3 worldPos,out int3 result, int chunkSize = CHUNK_SIZE)
+        public static void WorldPosToChunkCoord(in float3 worldPos, out int3 result, int chunkSize = CHUNK_SIZE)
         {
             result = new int3(
                 (int)math.floor(worldPos.x / chunkSize),
@@ -176,7 +185,7 @@ namespace Project.Scripts.DOTS.Other
 
 
         [BurstCompile]
-        public static void  GetBlockUV(in BlockType type, int face, out float2 result)
+        public static void GetBlockUV(in BlockType type, int face, out float2 result)
         {
             // get the total number of block types in the enum
             // Enum.GetValues() returns an array of all values in the enum.
@@ -192,13 +201,17 @@ namespace Project.Scripts.DOTS.Other
 
             switch (face)
             {
-                case 0: result = uvMin + new float2(0f, 0f); // Bottom-left
+                case 0:
+                    result = uvMin + new float2(0f, 0f); // Bottom-left
                     return;
-                case 1: result = uvMin + new float2(tileWidth, 0f); // Bottom-right
+                case 1:
+                    result = uvMin + new float2(tileWidth, 0f); // Bottom-right
                     return;
-                case 2: result = uvMin + new float2(0f, 1f); // Top-left
+                case 2:
+                    result = uvMin + new float2(0f, 1f); // Top-left
                     return;
-                case 3: result = uvMin + new float2(tileWidth, 1f); // Top-right
+                case 3:
+                    result = uvMin + new float2(tileWidth, 1f); // Top-right
                     return;
             }
 
