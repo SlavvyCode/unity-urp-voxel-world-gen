@@ -1,83 +1,12 @@
-// using System.Collections;
-// using System.Collections.Generic;
-// using NUnit.Framework;
-// using Unity.Collections;
-// using Unity.Entities;
-// using Unity.Mathematics;
-// using UnityEngine;
-//
-// public class MeshUploadHandler : MonoBehaviour
-// {
-//     public EntityManager entityManager;
-//     
-//     void Start()
-//     {
-//      
-//         entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-//     }
-//
-//
-//     void LateUpdate()
-//     {
-//         while (MeshUploadQueues.PreviousQueue.TryDequeue(out var meshUploadRequest))
-//         {
-//             var filter = entityManager.GetComponentObject<MeshFilter>(meshUploadRequest.MeshEntity);
-//             var renderer = entityManager.GetComponentObject<MeshRenderer>(meshUploadRequest.MeshEntity);
-//             Mesh mesh = new Mesh();
-//   
-//             
-//             var vertsArray = meshUploadRequest.Vertices;
-//             Vector3[] verts = new Vector3[vertsArray.Length];
-//             for (int i = 0; i < vertsArray.Length; i++)
-//                 verts[i] = vertsArray[i].position;
-//
-//
-//             // List<int> tris = new List<int>();
-//             // for (int i = 0; i < meshUploadRequest.Triangles.Length; i++)
-//             //     tris.Add(meshUploadRequest.Triangles[i]); 
-//             NativeArray<int> trisArray = meshUploadRequest.Triangles;
-//             int[] tris = new int[trisArray.Length];
-//             for (int i = 0; i < trisArray.Length; i++)
-//                 tris[i] = trisArray[i];
-//            
-//             
-//             
-//             
-//             // List<Vector2> uvs = new List<Vector2>();
-//             // for (int i = 0; i < meshUploadRequest.UVs.Length; i++)
-//             //     uvs.Add(meshUploadRequest.UVs[i]); 
-//             NativeArray<float2> uvsArray = meshUploadRequest.UVs;
-//             Vector2[] uvs = new Vector2[uvsArray.Length];
-//             for (int i = 0; i < uvsArray.Length; i++)
-//                 uvs[i] = new Vector2(uvsArray[i].x, uvsArray[i].y);
-//             
-//
-//             
-//             mesh.SetVertices(verts);
-//             mesh.SetTriangles(tris, 0);
-//             mesh.RecalculateNormals();
-//             mesh.SetUVs(0,uvs);
-//             filter.mesh = mesh;
-//             renderer.enabled = true;
-//             
-//             // Debug.Log("MeshUploadHandler: mesh uploaded");
-//
-//             
-//             // meshUploadRequest.MeshEntity.RemoveComponent<ChunkMeshPending>();
-//             meshUploadRequest.Vertices.Dispose();
-//             meshUploadRequest.Triangles.Dispose();
-//             // this.enabled = false;
-//         }
-//     }
-// }
-
 using System.Collections.Generic;
+using Project.Scripts.DOTS.Other;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
-
+using static Project.Scripts.DOTS.Other.DOTS_Utils;
 public class MeshUploadHandler : MonoBehaviour
 {
     public EntityManager entityManager;
@@ -99,7 +28,8 @@ public class MeshUploadHandler : MonoBehaviour
 
             // get mesh from pool or create new
             Mesh mesh = meshPool.Count > 0 ? meshPool.Pop() : new Mesh { indexFormat = IndexFormat.UInt32 };
-            mesh.Clear();
+            //clear is useless if we overwrite
+            // mesh.Clear();
 
             int vertCount = request.Vertices.Length;
             int triCount = request.Triangles.Length;
@@ -124,6 +54,12 @@ public class MeshUploadHandler : MonoBehaviour
             // Assign mesh
             filter.mesh = mesh;
             renderer.enabled = true;
+
+            float3 chunkOrigin = entityManager.GetComponentData<LocalTransform>(request.MeshEntity).Position;
+            float3 chunkSize   = new float3(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE); // replace with your actual chunk dimensions
+            float3 center      = chunkOrigin + chunkSize * 0.5f;
+
+            mesh.bounds = new Bounds(center, chunkSize);
 
             
             //todo maybe first try to get it simpler and simplify into Method-like snippets that you can easily understand, then the errors should be evident
