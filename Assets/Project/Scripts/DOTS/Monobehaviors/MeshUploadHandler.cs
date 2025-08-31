@@ -70,6 +70,7 @@
 //         }
 //     }
 // }
+
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
@@ -89,45 +90,47 @@ public class MeshUploadHandler : MonoBehaviour
         entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
     }
 
-   void LateUpdate()
-{
-    while (MeshUploadQueues.PreviousQueue.TryDequeue(out var request))
+    void LateUpdate()
     {
-        MeshFilter filter = entityManager.GetComponentObject<MeshFilter>(request.MeshEntity);
-        MeshRenderer renderer = entityManager.GetComponentObject<MeshRenderer>(request.MeshEntity);
-
-        // get mesh from pool or create new
-        Mesh mesh = meshPool.Count > 0 ? meshPool.Pop() : new Mesh { indexFormat = IndexFormat.UInt32 };
-        mesh.Clear();
-
-        int vertCount = request.Vertices.Length;
-        int triCount = request.Triangles.Length;
-
-        // Set single-stream vertex buffer layout
-
-        mesh.SetVertexBufferParams(vertCount, new[]
+        while (MeshUploadQueues.PreviousQueue.TryDequeue(out var request))
         {
-            new VertexAttributeDescriptor(VertexAttribute.Position),
-            new VertexAttributeDescriptor(VertexAttribute.Normal),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord0)
-        });
-        mesh.SetVertexBufferData(request.Vertices, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
-        mesh.SetIndexBufferParams(triCount, IndexFormat.UInt32);
+            MeshFilter filter = entityManager.GetComponentObject<MeshFilter>(request.MeshEntity);
+            MeshRenderer renderer = entityManager.GetComponentObject<MeshRenderer>(request.MeshEntity);
 
-        mesh.SetIndexBufferParams(triCount, IndexFormat.UInt32);
-        mesh.SetIndexBufferData(request.Triangles, 0, 0, triCount, MeshUpdateFlags.DontValidateIndices);
+            // get mesh from pool or create new
+            Mesh mesh = meshPool.Count > 0 ? meshPool.Pop() : new Mesh { indexFormat = IndexFormat.UInt32 };
+            mesh.Clear();
 
-        mesh.subMeshCount = 1;
-        mesh.SetSubMesh(0, new SubMeshDescriptor(0, triCount, MeshTopology.Triangles), MeshUpdateFlags.DontRecalculateBounds);
-        // Assign mesh
-        filter.mesh = mesh;
-        renderer.enabled = true;
+            int vertCount = request.Vertices.Length;
+            int triCount = request.Triangles.Length;
 
-        // Return NativeArrays to dispose
-        request.Vertices.Dispose();
-        request.Triangles.Dispose();
-        request.UVs.Dispose();
+            // Set single-stream vertex buffer layout
+
+            // this and changing the [] in the Vertex struct fixed it!
+            mesh.SetVertexBufferParams(vertCount, new[]
+            {
+                new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
+                new VertexAttributeDescriptor(VertexAttribute.Normal,   VertexAttributeFormat.Float32, 3),
+                new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
+            });
+            mesh.SetVertexBufferData(request.Vertices, 0, 0, vertCount, 0, MeshUpdateFlags.DontRecalculateBounds);
+            mesh.SetIndexBufferParams(triCount, IndexFormat.UInt32);
+
+            mesh.SetIndexBufferData(request.Triangles, 0, 0, triCount, MeshUpdateFlags.DontValidateIndices);
+
+            mesh.subMeshCount = 1;
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, triCount, MeshTopology.Triangles),
+                MeshUpdateFlags.DontRecalculateBounds);
+            // Assign mesh
+            filter.mesh = mesh;
+            renderer.enabled = true;
+
+            
+            //todo maybe first try to get it simpler and simplify into Method-like snippets that you can easily understand, then the errors should be evident
+            // Return NativeArrays to dispose
+            request.Vertices.Dispose();
+            request.Triangles.Dispose();
+            request.UVs.Dispose();
+        }
     }
-}
-
 }
