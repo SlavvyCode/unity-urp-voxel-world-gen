@@ -10,6 +10,8 @@ using Unity.Transforms;
 using UnityEngine;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
 
+
+
 [BurstCompile]
 [UpdateAfter(typeof(ChunkDespawnMarkerSystem))]
 [UpdateBefore(typeof(MeshGenerationSystem))]
@@ -21,6 +23,13 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     private BufferLookup<DOTS_Block> blocksLookup;
 
 
+    public struct WorldHeightmapWindow : IComponentData
+    {
+        public int2 CenterPosition; // World XZ of window center = player position floored to chunk coords
+        public int2 WindowSize;    
+        public NativeArray<int> blockColHeights; // Flat array for the window
+        // public NativeArray<int>  ; // Flat array for the window
+    }
     // todo
     // maybe we only need to generate blocks:
     // - for chunks that are within a certain distance of the player (e.g., some buffer) - eg. a creeper coming up behind you and exploding - for simulations
@@ -28,8 +37,6 @@ public partial struct ChunkBlockGenerationSystem : ISystem
 
     // IMPORTANT NOTE!
     // CANNOT BE REFACTORED
-    
-    
     
     // TODO CONCRETE PLAN TO SPEED UP
     // TODO
@@ -51,15 +58,22 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     private NativeList<Entity> desiredChunks;
 
     // private NativeList<int2> chunkYColumnCoords;
-    private NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
+    // private NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
     private EntityQuery allChunksQuery;
     private float2 perlinOffset;
     private NativeList<int2> uniqueChunkXZCoords;
 
+
+    private NativeArray<int2> flattenedXZChunkCoordArrayWindow; 
+    private NativeArray<int> blockHeightsWindow; 
+    
     // todo Chunk pooling
     // - Reuse DOTS_Block buffers for chunks that leave the radius instead of reallocating
     public void OnCreate(ref SystemState state)
     {
+        
+        
+        
         chunksLookup = SystemAPI.GetComponentLookup<DOTS_Chunk>(true);
         blocksLookup = SystemAPI.GetBufferLookup<DOTS_Block>(false);
         // chunkStateLookup = SystemAPI.GetComponentLookup<DOTS_ChunkState>(false);
@@ -78,8 +92,8 @@ public partial struct ChunkBlockGenerationSystem : ISystem
     {
         //can not be disposed i think
         // allChunksQuery.Dispose();
-        if (blockColumnCoordsToHeightHashMap.IsCreated)
-            blockColumnCoordsToHeightHashMap.Dispose();
+        // if (blockColumnCoordsToHeightHashMap.IsCreated)
+            // blockColumnCoordsToHeightHashMap.Dispose();
         desiredChunks.Dispose();
 
         if (!uniqueChunkXZCoords.IsCreated)
@@ -143,26 +157,39 @@ public partial struct ChunkBlockGenerationSystem : ISystem
             uniqueChunkXZCoords.Add(chunkColumnXZCoord);
         }
 
-        //todo replace the hashmap to make it faster if that's where the bottleneck is
-        if (!blockColumnCoordsToHeightHashMap.IsCreated)
-            //for each chunk th
-        {
-            blockColumnCoordsToHeightHashMap =
-                new NativeParallelHashMap<int2, int>(uniqueChunkXZCoords.Length * CHUNK_SIZE*CHUNK_SIZE, Allocator.Persistent);
-        }
-        else if (blockColumnCoordsToHeightHashMap.Count() < desiredChunks.Length)
-        {
-            blockColumnCoordsToHeightHashMap.Dispose();
-            blockColumnCoordsToHeightHashMap =
-                new NativeParallelHashMap<int2, int>(desiredChunks.Length, Allocator.Persistent);
-        }
-        else blockColumnCoordsToHeightHashMap.Clear(); // safe only if no jobs are scheduled
-
-
-        //todo can be made much faster with array i think
-
+       
         #endregion
 
+ 
+        //TODO PLANNING!
+        //todo create a sliding window in array form. of heights. we should be able to calculate the index based on the coords in the window.
+
+        int renderDistance = 0;
+        int2 playerChunkCoordXZ = new int2(0, 0);
+        foreach (var (settings,playerChunkCoords,tag) in SystemAPI.Query<RefRO<PlayerSettings>,RefRO<EntityChunkCoords>, RefRO<PlayerTag>>())
+        {
+            renderDistance = settings.ValueRO.renderDistance;
+            playerChunkCoordXZ = playerChunkCoords.ValueRO.newChunkCoords.xz;
+        }
+
+        // windows are 2D, centered on the player.
+        int windowEdgeChunkLength = (2 * renderDistance)+1;
+        int windowEdgeBlockLength = windowEdgeChunkLength * CHUNK_SIZE;
+        
+        int windowChunkLength = windowEdgeChunkLength * windowEdgeChunkLength;
+        int windowBlockLength = windowEdgeBlockLength * windowEdgeBlockLength;
+        
+        //todo i'm not sure but i think this is to be thrown out
+        if (!flattenedXZChunkCoordArrayWindow.IsCreated)
+            flattenedXZChunkCoordArrayWindow = new NativeArray<int2>( windowChunkLength,Allocator.Persistent);
+            // indexing of the window = 1 row = 2x renderDistance +1  (one in each direction  and one for the center chunk the player stands on right)
+        
+        if(!blockHeightsWindow.IsCreated)
+            blockHeightsWindow = new NativeArray<int>( windowBlockLength,Allocator.Persistent);
+
+
+       
+        
 
         if (math.all(perlinOffset == float2.zero))
         {
@@ -172,16 +199,23 @@ public partial struct ChunkBlockGenerationSystem : ISystem
             );
         }
         //2. do heightmap job
-        // todo WHAT DO I NEED TO KNOW TO GENERATE HEIGHT MAP FOR ANY GIVEN BLOCK COLUMN
+        
+        
+        // think: "WHAT DO I NEED TO KNOW TO GENERATE HEIGHT MAP FOR ANY GIVEN BLOCK COLUMN"
         var heightMapForBlockColumnsJob = new HeightMapForBlockColumnsJob
         {
+            #region worldparams
             perlinOffset = perlinOffset,
             terrainRoughness = worldParams.terrainRoughness,
             baseHeight = worldParams.baseHeight,
             heightVariation = worldParams.heightVariation,
             noiseLayers = worldParams.noiseLayers,
+            #endregion
             chunkXZCoords = uniqueChunkXZCoords,
-            coordsToHeightsHashMap = blockColumnCoordsToHeightHashMap.AsParallelWriter()
+            // coordsToHeightsHashMap = blockColumnCoordsToHeightHashMap.AsParallelWriter()
+            blockHeightsWindow = blockHeightsWindow,
+            renderDistance = renderDistance,
+            windowEdgeBlockLength = windowEdgeBlockLength
         };
 
         //3 do generation job 
@@ -195,7 +229,10 @@ public partial struct ChunkBlockGenerationSystem : ISystem
             ecb = ecb.AsParallelWriter(),
 
             desiredChunks = desiredChunks,
-            blockColumnCoordsToHeightHashMap = blockColumnCoordsToHeightHashMap,
+            blockHeightsWindow = blockHeightsWindow,
+            // renderDistance = renderDistance,
+            windowEdgeBlockLength = windowEdgeBlockLength, 
+            playerChunkCoordXZ= playerChunkCoordXZ,
         };
 
         var handle1 =
@@ -210,20 +247,31 @@ public partial struct ChunkBlockGenerationSystem : ISystem
         // ECB.Playback(state.EntityManager);
         // ECB.Dispose();
     }
+
 }
+
+
+
+
 [BurstCompile]
 public struct HeightMapForBlockColumnsJob : IJobFor
 {
-    
-    public float2 perlinOffset;
-    public float terrainRoughness;
-    public float baseHeight;
-    public float heightVariation;
-    public int noiseLayers;
+    #region  terrainGen
+        public float2 perlinOffset;
+        public float terrainRoughness;
+        public float baseHeight;
+        public float heightVariation;
+        public int noiseLayers;
+    #endregion
 
-    public NativeParallelHashMap<int2, int>.ParallelWriter coordsToHeightsHashMap; // Array of pillar coordinates (x,z)
+
+    // public NativeParallelHashMap<int2, int>.ParallelWriter coordsToHeightsHashMap; // Array of pillar coordinates (x,z)
     [ReadOnly] public NativeList<int2> chunkXZCoords;
-
+    public int2 playerChunkCoordXZ;
+    
+    [NativeDisableParallelForRestriction] public NativeArray<int> blockHeightsWindow;
+    public int renderDistance;
+    public int windowEdgeBlockLength;
     
     //do for each chunk
     [BurstCompile]
@@ -239,11 +287,28 @@ public struct HeightMapForBlockColumnsJob : IJobFor
             // compute world x,z coordinates
             int2 worldColumn = new int2(chunkColumnCoord.x + localX, chunkColumnCoord.y + localZ);
     
+            // Compute offsets in **blocks** relative to player center
+            int dx = worldColumn.x - playerChunkCoordXZ.x * CHUNK_SIZE;
+            int dz = worldColumn.y - playerChunkCoordXZ.y * CHUNK_SIZE;
+
+            // Skip blocks outside window
+            int windowHalf = renderDistance * CHUNK_SIZE;
+            if (math.abs(dx) > windowHalf || math.abs(dz) > windowHalf)
+                continue;
+
+            // Compute height
             int height = (int)CalculateTerrainHeight(worldColumn.x, worldColumn.y);
-            coordsToHeightsHashMap.TryAdd(worldColumn, height);
-            // DotsDebugLog("height added " + height);
+
+            // Write into window
+            int index = getBlockWindowIndexXZ(dx, dz, windowEdgeBlockLength);
+            blockHeightsWindow[index] = height;
         }
     }
+    public static bool IsInWindow(int dx, int dz, int renderDistance)
+    {
+        return math.abs(dx) <= renderDistance && math.abs(dz) <= renderDistance;
+    }
+            
 
     float CalculateTerrainHeight(int pillarX, int pillarY)
     {
@@ -273,6 +338,10 @@ public struct HeightMapForBlockColumnsJob : IJobFor
         }
     }
 }
+
+
+
+
 [BurstCompile(CompileSynchronously = true)]
 public struct GenerateChunkBlocksJob : IJobFor
 {
@@ -281,8 +350,13 @@ public struct GenerateChunkBlocksJob : IJobFor
     // [ReadOnly] public NativeArray<int2> chunkYColumnCoords;
     [ReadOnly] public ComponentLookup<DOTS_Chunk> chunksLookup;
     [NativeDisableParallelForRestriction] public BufferLookup<DOTS_Block> blocksLookup;
-    [ReadOnly] public NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
+    // [ReadOnly] public NativeParallelHashMap<int2, int> blockColumnCoordsToHeightHashMap;
     public EntityCommandBuffer.ParallelWriter ecb;
+
+    public int2 playerChunkCoordXZ;
+    [NativeDisableParallelForRestriction] public NativeArray<int> blockHeightsWindow;
+    public int windowEdgeBlockLength;
+    public int renderDistance;
 
     //todo
     // pillar height depends on render distance (spawned chunks).
@@ -305,6 +379,10 @@ public struct GenerateChunkBlocksJob : IJobFor
 
         int2 chunkColumnCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
        
+
+
+        
+        
         int columnHeight;
         int stoneBottom = 0;
 
@@ -312,10 +390,15 @@ public struct GenerateChunkBlocksJob : IJobFor
         for (int localX = 0; localX < CHUNK_SIZE; localX++)
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
         {
-            blockColumnCoordsToHeightHashMap.TryGetValue(new int2(chunkColumnCoord.x+localX,chunkColumnCoord.y + localZ), out columnHeight);
+            int worldX = chunkColumnCoord.x + localX;
+            int worldZ = chunkColumnCoord.y + localZ;
 
-            //COLUMN HEIGHT IS NEARLY ALWAYS AT 0!
-            // DotsDebugLog("columnHeight is " + columnHeight);
+            int dx = worldX - playerChunkCoordXZ.x * CHUNK_SIZE;
+            int dz = worldZ - playerChunkCoordXZ.y * CHUNK_SIZE;
+            int index = getBlockWindowIndexXZ(dx, dz, windowEdgeBlockLength);
+            columnHeight = blockHeightsWindow[index];
+            // blockColumnCoordsToHeightHashMap.TryGetValue(new int2(chunkColumnCoord.x+localX,chunkColumnCoord.y + localZ), out columnHeight);
+
 
             int stoneTop = math.max(stoneBottom, columnHeight - 4);
             int dirtTop = math.max(stoneTop, columnHeight - 1);
@@ -367,4 +450,6 @@ public struct GenerateChunkBlocksJob : IJobFor
         for (int i = 0; i < CHUNK_VOLUME; i++)
             blocks[i] = new DOTS_Block { Value = BlockType.Air };
     }
+    
+    
 }

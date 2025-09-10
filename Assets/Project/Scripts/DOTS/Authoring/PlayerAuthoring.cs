@@ -9,6 +9,7 @@ public class PlayerAuthoring : MonoBehaviour
 {
     [Header("DANGER- under some version of chunkGeneration, setting " +
             "render distance to 0 may NOT generate any chunk whatsoever")]
+    [Range(1,100)]
     public int renderDistance;
     public class Baker : Baker<PlayerAuthoring>
     {
