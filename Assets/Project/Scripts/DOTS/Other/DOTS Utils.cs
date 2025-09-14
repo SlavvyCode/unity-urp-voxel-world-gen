@@ -258,31 +258,15 @@ namespace Project.Scripts.DOTS.Other
         /// <summary>
         /// Converts a block offset (dx, dz) from the player’s center to a flat array index.
         /// </summary>
+// Update the getBlockWindowIndexXZ method to make the window symmetric
         public static int getBlockWindowIndexXZ(int dx, int dz, int windowEdgeBlockLength)
         {
-            int blockWindowHalf = (windowEdgeBlockLength - CHUNK_SIZE) / 2;
-
-            // int blockWindowHalf = windowEdgeBlockLength / 2;
-
-            // for example render dist =5 and chunk size =16 makes 5*16=80 blocks in each direction and 16 for the center chunk.
-            // totaling to 176
-            int xIndex = dx + blockWindowHalf;
-            int zIndex = dz + blockWindowHalf;
-
-            // if (xIndex < 0 || xIndex >= windowEdgeBlockLength || zIndex < 0 || zIndex >= windowEdgeBlockLength)
-                // throw new ArgumentOutOfRangeException("Block offset is out of bounds of the window");
-                
-                // split up the error into two checks to see which one is out of bounds
-                if (xIndex < 0 || xIndex >= windowEdgeBlockLength)
-                    throw new Exception("Block offset X is out of bounds of the window"
-                                        + $" (xIndex: {xIndex}, windowEdgeBlockLength: {windowEdgeBlockLength})");
-                
-                if (zIndex < 0 || zIndex >= windowEdgeBlockLength)
-                    throw new Exception("Block offset Z is out of bounds of the window"
-                                        + $" (zIndex: {zIndex}, windowEdgeBlockLength: {windowEdgeBlockLength})");
-                
-
-            return zIndex * windowEdgeBlockLength + xIndex;
+            // Make window symmetric around center
+            int windowHalf = (windowEdgeBlockLength - 1) / 2;
+            int x = (int)((dx + windowHalf + 0.5f));
+            int z = (int)((dz + windowHalf + 0.5f));
+            int index = z * windowEdgeBlockLength + x;
+            return index;
         }
         
         

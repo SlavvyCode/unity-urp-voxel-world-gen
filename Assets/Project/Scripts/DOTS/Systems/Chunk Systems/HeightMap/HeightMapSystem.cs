@@ -116,6 +116,13 @@ namespace Project.Scripts.DOTS.Systems
             UpdateWindow(newCenter, oldCenter);
 
             GetNewColumnCoords(oldCenter, newCenter, renderDistance, CHUNK_SIZE);
+    
+            // Calculate the center of the window in block coordinates
+            // We use a half-block offset to handle the even chunk size later on
+            int2 centerBlockCoord = new int2(
+                playerChunkCoordXZ.x * CHUNK_SIZE + CHUNK_SIZE / 2,
+                playerChunkCoordXZ.y * CHUNK_SIZE + CHUNK_SIZE / 2
+            );
 
             ScheduleHeightMapJob(ref state, playerChunkCoordXZ);
         }
@@ -148,14 +155,14 @@ namespace Project.Scripts.DOTS.Systems
             return (playerChunkCoordXZ);
         }
 
-        private void ScheduleHeightMapJob(ref SystemState state, int2 playerChunkCoordXZ)
+        private void ScheduleHeightMapJob(ref SystemState state, int2 centerBlockCoord)
         {
             var heightMapForBlockColumnsJob = new HeightMapForBlockColumnsJob
             {
                 perlinOffset = perlinOffset,
                 worldParams = worldParams,
 
-                playerChunkCoordXZ = playerChunkCoordXZ,
+                centerBlockCoord = centerBlockCoord,
 
                 chunkXZCoords = newColumnsList,
                 blockHeightsWindow = blockHeightsWindow,
@@ -193,7 +200,14 @@ namespace Project.Scripts.DOTS.Systems
                 // gets set in another function  firstRun = false;
             }
         }
-
+        // rend dist is 5, chunk size is 16 (chunks are cubes but with xz we obviously count squares instead)
+        // windowedgeblocklength is
+        // blockheightswindow len is
+        //
+        //
+        // ... what if the problem is caused by the fact that the CENTER isn't REALLY the center. it's the origin coordinates of the chunk the player is on. which COULD mean that one side is still being offset in some calculations 
+        //
+        // i mean that would make sense to me
 
         private void InitWindowData()
         {
@@ -252,16 +266,15 @@ namespace Project.Scripts.DOTS.Systems
         /// <returns></returns>
         public NativeList<int2> GetNewColumnCoords(int2 oldCenter, int2 newCenter, int renderDistance, int chunkSize)
         {
-            // newColumnsList.Clear();
+            newColumnsList.Clear();
             int dx = newCenter.x - oldCenter.x;
             int dz = newCenter.y - oldCenter.y;
-
+    
             // For large movements/teleports: Generate entire window
             if (firstRun || math.abs(dx) > 1 || math.abs(dz) > 1)
             {
                 firstRun = false;
-                
-                newColumnsList.Clear();
+        
                 for (int cz = newCenter.y - renderDistance; cz <= newCenter.y + renderDistance; cz++)
                 for (int cx = newCenter.x - renderDistance; cx <= newCenter.x + renderDistance; cx++)
                     newColumnsList.Add(new int2(cx * chunkSize, cz * chunkSize));
@@ -271,11 +284,10 @@ namespace Project.Scripts.DOTS.Systems
                 // +X strip
                 if (dx > 0)
                 {
-                    int stripX = newCenter.x + renderDistance; // chunk coord
+                    int stripX = newCenter.x + renderDistance;
                     for (int z = newCenter.y - renderDistance; z <= newCenter.y + renderDistance; z++)
                         newColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
                 }
-
                 // -X strip
                 if (dx < 0)
                 {
@@ -283,7 +295,6 @@ namespace Project.Scripts.DOTS.Systems
                     for (int z = newCenter.y - renderDistance; z <= newCenter.y + renderDistance; z++)
                         newColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
                 }
-
                 // +Z strip
                 if (dz > 0)
                 {
@@ -291,7 +302,6 @@ namespace Project.Scripts.DOTS.Systems
                     for (int x = newCenter.x - renderDistance; x <= newCenter.x + renderDistance; x++)
                         newColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
                 }
-
                 // -Z strip
                 if (dz < 0)
                 {
@@ -300,10 +310,10 @@ namespace Project.Scripts.DOTS.Systems
                         newColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
                 }
             }
-
             return newColumnsList;
         }
-
+        
+        
         // todo can i make a system that is a static UTIL system to share this function? 
         public bool PlayerChangedChunks(ref SystemState state)
         {
@@ -317,7 +327,7 @@ namespace Project.Scripts.DOTS.Systems
                              RefRW<LastChunkCoords>>()
                          .WithAll<PlayerTag>())
             {
-                if (chunkCoord.ValueRO.OnChunkChange == false)
+                if (chunkCoord.ValueRO.OnChunkChange)
                 {
                     return true;
                 }
@@ -352,40 +362,36 @@ namespace Project.Scripts.DOTS.Systems
             
             // todo Wait... so should i  rework this to not consider the center chunk as special?
             // Calculate the half size using the same logic as getBlockWindowIndexXZ
-            int blockWindowHalf = (windowEdgeBlockLength - CHUNK_SIZE) / 2;
+            int blockWindowHalf = windowEdgeBlockLength / 2;
 
             // Iterate through all positions in the old window
             for (int z = 0; z < windowEdgeBlockLength; z++)
+            for (int x = 0; x < windowEdgeBlockLength; x++)
             {
-                for (int x = 0; x < windowEdgeBlockLength; x++)
+                // Convert array indices to block offsets relative to the old center
+                int dx = x - blockWindowHalf;
+                int dz = z - blockWindowHalf;
+
+                // Calculate the new block offsets after the shift
+                int newDx = dx - shiftX;
+                int newDz = dz - shiftZ;
+
+                // Check if the new block offsets are within the window bounds
+                  
+                // Check if the old block offsets were within the window bounds
+                if (dx >= -blockWindowHalf && dx < blockWindowHalf &&
+                    dz >= -blockWindowHalf && dz < blockWindowHalf)
                 {
-                    // Convert array indices to block offsets relative to the old center
-                    int dx = x - blockWindowHalf;
-                    int dz = z - blockWindowHalf;
-
-                    // Calculate the new block offsets after the shift
-                    int newDx = dx - shiftX;
-                    int newDz = dz - shiftZ;
-
-                    // Check if the new block offsets are within the window bounds
-                    if (newDx >= -blockWindowHalf && newDx < blockWindowHalf + CHUNK_SIZE &&
-                        newDz >= -blockWindowHalf && newDz < blockWindowHalf + CHUNK_SIZE)
-                    {
-                        // Calculate the index in the old window (current x,z)
-                        int oldIndex = z * windowEdgeBlockLength + x;
-
-                        // Calculate the index in the new window for the new offsets
-                        try
-                        {
-                            int newIndex = getBlockWindowIndexXZ(newDx, newDz, windowEdgeBlockLength);
-                            window[newIndex] = oldWindowCopy[oldIndex];
-                        }
-                        catch
-                        {
-                            // If we get an index out of bounds, skip this block
-                            // This might happen at the edges due to rounding or off-by-one
-                        }
-                    }
+                    // Calculate the index in the old window
+                    int oldX = dx + blockWindowHalf;
+                    int oldZ = dz + blockWindowHalf;
+                    int oldIndex = oldZ * windowEdgeBlockLength + oldX;
+                
+                    // Calculate the index in the new window
+                    int newIndex = z * windowEdgeBlockLength + x;
+                
+                    // Copy the height value
+                    window[newIndex] = oldWindowCopy[oldIndex];
                 }
             }
 

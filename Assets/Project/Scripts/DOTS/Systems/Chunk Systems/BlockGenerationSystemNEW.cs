@@ -146,15 +146,13 @@ public struct GenerateChunkBlocksJob : IJobFor
         Entity chunkEntity = desiredChunks[jobIndex];
         int3 chunkCoord = chunksLookup[chunkEntity].ChunkCoord;
         DynamicBuffer<DOTS_Block> blocks = blocksLookup[chunkEntity];
-
         InitializeChunkBlocks(ref blocks);
 
-
-        int2 chunkColumnCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
-       
-
-
-        
+        int2 centerBlockCoord = new int2(
+            playerChunkCoordXZ.x * CHUNK_SIZE + CHUNK_SIZE / 2,
+            playerChunkCoordXZ.y * CHUNK_SIZE + CHUNK_SIZE / 2
+        );
+        int2 chunkColumnWorldCoord = new int2(chunkCoord.x * CHUNK_SIZE, chunkCoord.z * CHUNK_SIZE);
         
         int columnHeight;
         int stoneBottom = 0;
@@ -163,11 +161,11 @@ public struct GenerateChunkBlocksJob : IJobFor
         for (int localX = 0; localX < CHUNK_SIZE; localX++)
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++)
         {
-            int worldX = chunkColumnCoord.x + localX;
-            int worldZ = chunkColumnCoord.y + localZ;
+            int worldX = chunkColumnWorldCoord.x + localX;
+            int worldZ = chunkColumnWorldCoord.y + localZ;
 
-            int dx = worldX - playerChunkCoordXZ.x * CHUNK_SIZE;
-            int dz = worldZ - playerChunkCoordXZ.y * CHUNK_SIZE;
+            int dx = worldX - centerBlockCoord.x;
+            int dz = worldZ - centerBlockCoord.y;
             int index = getBlockWindowIndexXZ(dx, dz, windowEdgeBlockLength);
             columnHeight = blockHeightsWindow[index];
             // blockColumnCoordsToHeightHashMap.TryGetValue(new int2(chunkColumnCoord.x+localX,chunkColumnCoord.y + localZ), out columnHeight);

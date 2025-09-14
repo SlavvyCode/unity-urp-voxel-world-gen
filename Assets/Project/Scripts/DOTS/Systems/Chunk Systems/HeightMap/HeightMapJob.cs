@@ -25,7 +25,7 @@ namespace Project.Scripts.DOTS.Systems
 
         // public NativeParallelHashMap<int2, int>.ParallelWriter coordsToHeightsHashMap; // Array of pillar coordinates (x,z)
         [ReadOnly] public NativeList<int2> chunkXZCoords;
-        public int2 playerChunkCoordXZ;
+        public int2 centerBlockCoord;
 
         [NativeDisableParallelForRestriction] public NativeArray<int> blockHeightsWindow;
         public int renderDistance;
@@ -41,6 +41,16 @@ namespace Project.Scripts.DOTS.Systems
             heightVariation = worldParams.heightVariation;
             noiseLayers = worldParams.noiseLayers;
             
+            int centerX = centerBlockCoord.x;
+            int centerZ = centerBlockCoord.y;
+            
+            int centerWorldX = centerX * CHUNK_SIZE;
+            int centerWorldZ = centerZ * CHUNK_SIZE;
+            
+            //todo is this true
+            // half window size in blocks. works for odd and even window sizes
+            int windowHalf = (windowEdgeBlockLength - 1) / 2;
+            
             
             
             // get a chunk based on index
@@ -53,21 +63,21 @@ namespace Project.Scripts.DOTS.Systems
                 // compute world x,z coordinates
                 int2 worldColumn = new int2(chunkColumnCoord.x + localX, chunkColumnCoord.y + localZ);
 
-                // Compute offsets in **blocks** relative to player center
-                int dx = worldColumn.x - playerChunkCoordXZ.x * CHUNK_SIZE;
-                int dz = worldColumn.y - playerChunkCoordXZ.y * CHUNK_SIZE;
+                // Compute offsets in **blocks** relative to player's chunk's center
+                int dx = worldColumn.x - centerWorldX;
+                int dz = worldColumn.y - centerWorldZ;
 
                 // Skip blocks outside window
-                int windowHalf = renderDistance * CHUNK_SIZE;
                 if (math.abs(dx) > windowHalf || math.abs(dz) > windowHalf)
                     continue;
 
                 // Compute height
                 int height = (int)CalculateTerrainHeight(worldColumn.x, worldColumn.y);
-
+                
                 // Write into window
                 int index = getBlockWindowIndexXZ(dx, dz, windowEdgeBlockLength);
-                blockHeightsWindow[index] = height;
+                if (index >= 0 && index < blockHeightsWindow.Length)
+                    blockHeightsWindow[index] = height;
             }
         }
 
