@@ -123,7 +123,7 @@ public partial struct ChunkSpawnSystem : ISystem
 }
 
 [UpdateAfter(typeof(ChunkSpawnSystem))]
-[UpdateBefore(typeof(ChunkBlockGenerationSystem))]
+[UpdateBefore(typeof(BlockGenerationSystemNEW))]
 public partial struct FillLoadedChunksSystem : ISystem
 {
 
