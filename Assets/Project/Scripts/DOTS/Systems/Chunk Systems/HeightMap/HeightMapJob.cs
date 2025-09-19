@@ -41,17 +41,11 @@ namespace Project.Scripts.DOTS.Systems
             heightVariation = worldParams.heightVariation;
             noiseLayers = worldParams.noiseLayers;
             
-            int centerX = centerBlockCoord.x;
-            int centerZ = centerBlockCoord.y;
+            int centerWorldX = centerBlockCoord.x;
+            int centerWorldZ = centerBlockCoord.y;
             
-            int centerWorldX = centerX * CHUNK_SIZE;
-            int centerWorldZ = centerZ * CHUNK_SIZE;
-            
-            //todo is this true
-            // half window size in blocks. works for odd and even window sizes
-            int windowHalf = (windowEdgeBlockLength - 1) / 2;
-            
-            
+            // half window size in blocks (works for even and odd)
+            int windowHalf = windowEdgeBlockLength / 2;
             
             // get a chunk based on index
             // how many (x,z) samples per pillar
@@ -68,8 +62,9 @@ namespace Project.Scripts.DOTS.Systems
                 int dz = worldColumn.y - centerWorldZ;
 
                 // Skip blocks outside window
-                if (math.abs(dx) > windowHalf || math.abs(dz) > windowHalf)
-                    continue;
+                // if (math.abs(dx) > windowHalf || math.abs(dz) > windowHalf)
+                    // continue;
+                    // todo this has got to be the issue, never let a program silently fail on somethign so critical 
 
                 // Compute height
                 int height = (int)CalculateTerrainHeight(worldColumn.x, worldColumn.y);
@@ -77,7 +72,16 @@ namespace Project.Scripts.DOTS.Systems
                 // Write into window
                 int index = getBlockWindowIndexXZ(dx, dz, windowEdgeBlockLength);
                 if (index >= 0 && index < blockHeightsWindow.Length)
+                {
                     blockHeightsWindow[index] = height;
+                    
+                    // //every tenth index, log it
+                    // if (index % 10 == 0)
+                    // {
+                    //     DotsDebugLog("HeightMapJob: Set height at index " + index + " (dx: " + dx + ", dz: " + dz + ") to " + height);
+                    // }
+                }
+                
             }
         }
 

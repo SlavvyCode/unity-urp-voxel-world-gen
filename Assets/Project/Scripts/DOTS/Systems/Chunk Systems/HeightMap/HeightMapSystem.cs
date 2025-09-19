@@ -1,3 +1,4 @@
+using System;
 using Project.Scripts.DOTS.Other;
 using Unity.Burst;
 using Unity.Collections;
@@ -5,21 +6,12 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
+using UnityEngine;
 using static Project.Scripts.DOTS.Other.DOTS_Utils;
-using static Project.Scripts.DOTS.Systems.WorldHeightmapWindowHolder;
 
 namespace Project.Scripts.DOTS.Systems
 {
-    public static class WorldHeightmapWindowHolder
-    {
-        public static NativeArray<int> blockHeightsWindow;
-        public static JobHandle heightMapJobHandle;
 
-        public static int2
-            lastWindowCenterChunkCoordXZ; // chunk coord of window center (player position floored to chunk coords)
-
-        public static bool firstRun = true;
-    }
 
 
     [UpdateAfter(typeof(ChunkDespawnMarkerSystem))]
@@ -29,7 +21,7 @@ namespace Project.Scripts.DOTS.Systems
 
         // private ComponentLookup<DOTS_ChunkState> chunkStateLookup;
         private BufferLookup<DOTS_Block> blocksLookup;
-        private NativeList<int2> newColumnsList;
+        private NativeList<int2> newChunkColumnsList;
 
         // todo
         // maybe we only need to generate blocks:
@@ -60,9 +52,18 @@ namespace Project.Scripts.DOTS.Systems
         private int windowBlockLength;
         private int renderDistance;
         private WorldParams worldParams;
+        private int2 playerChunkCoordXZ;
+        public NativeArray<int> blockHeightsWindow;
+        public JobHandle heightMapJobHandle;
 
+        public int2
+            lastWindowCenterChunkCoordXZ; // chunk coord of window center (player position floored to chunk coords)
+
+        private bool heightMapReady;
+        private bool firstRun;
         public void OnCreate(ref SystemState state)
         {
+            firstRun = true;
             chunksLookup = SystemAPI.GetComponentLookup<DOTS_Chunk>(true);
             blocksLookup = SystemAPI.GetBufferLookup<DOTS_Block>(false);
             // chunkStateLookup = SystemAPI.GetComponentLookup<DOTS_ChunkState>(false);
@@ -76,57 +77,133 @@ namespace Project.Scripts.DOTS.Systems
 
             perlinOffset = float2.zero;
 
-            newColumnsList = new NativeList<int2>(Allocator.Persistent);
+            newChunkColumnsList = new NativeList<int2>(Allocator.Persistent);
+            
+            heightMapReady = false;
         }
 
         public void OnDestroy(ref SystemState state)
         {
             desiredChunks.Dispose();
             if (blockHeightsWindow.IsCreated) blockHeightsWindow.Dispose();
-            newColumnsList.Dispose();
+            newChunkColumnsList.Dispose();
         }
 
 
         public void OnUpdate(ref SystemState state)
         {
             // only update on chunk crossing, since window only moves then.
-            if (!PlayerChangedChunks(ref state)) return;
-
-            #region init uninteresting vars
-
             InitDesiredChunks(ref state);
-            if (desiredChunks.Length == 0)
-                return;
+            var hasDesiredChunks = desiredChunks.Length > 0;
 
+            playerChunkCoordXZ = GetPlayerPositionAndRenderDistance(ref state);
+            var playerChangedChunks = PlayerChangedChunks(ref state);
+
+            // DEPENDS ON RENDER DISTANCE, WATCH OUT FOR THE ORDER
+            InitWindowData();
             chunksLookup.Update(ref state);
             blocksLookup.Update(ref state);
-            GetWorldParams(ref state);
-            // Debug.Log($"Found {desiredChunks.Length} chunks that need BLOCK generation");
+            
+            // make sure to check if the heightmap job is done AND that it's already been started
+            if (heightMapJobHandle.IsCompleted && !heightMapJobHandle.Equals(default(JobHandle)))
+            {
+                heightMapJobHandle = default;
+                heightMapReady = true;
+                // Debug.Log("Heightmap job completed, heightmap is ready.");
+            }
 
-            var playerChunkCoordXZ = GetPlayerPositionAndRenderDistance(ref state);
+            
+            if (playerChangedChunks  )
+            {
+                #region init uninteresting vars
 
-            InitWindowData();
 
-            #endregion
+                GetWorldParams(ref state);
+                // Debug.Log($"Found {desiredChunks.Length} chunks that need BLOCK generation");
+
+                #endregion
 
 
-            int2 oldCenter = lastWindowCenterChunkCoordXZ; // store the previous
-            int2 newCenter = playerChunkCoordXZ; // get current
+                int2 oldCenter = lastWindowCenterChunkCoordXZ; // store the previous
+                int2 newCenter = playerChunkCoordXZ; // get current
 
-            UpdateWindow(newCenter, oldCenter);
+                // Update the heightmap window if the player has moved to a new chunk
+                MoveWindow(newCenter, oldCenter);
 
-            GetNewColumnCoords(oldCenter, newCenter, renderDistance, CHUNK_SIZE);
-    
-            // Calculate the center of the window in block coordinates
-            // We use a half-block offset to handle the even chunk size later on
-            int2 centerBlockCoord = new int2(
-                playerChunkCoordXZ.x * CHUNK_SIZE + CHUNK_SIZE / 2,
-                playerChunkCoordXZ.y * CHUNK_SIZE + CHUNK_SIZE / 2
-            );
+                GetNewChunkColumnCoords(oldCenter, newCenter, CHUNK_SIZE);
 
-            ScheduleHeightMapJob(ref state, playerChunkCoordXZ);
+                // Calculate the center of the window in block coordinates
+                // We use a half-block offset to handle the even chunk size later on
+                int2 centerBlockOfChunkPos = new int2(
+                    playerChunkCoordXZ.x * CHUNK_SIZE + CHUNK_SIZE / 2,
+                    playerChunkCoordXZ.y * CHUNK_SIZE + CHUNK_SIZE / 2
+                );
+
+                ScheduleHeightMapJob(ref state, centerBlockOfChunkPos);
+                heightMapReady = false; // Heightmap is now being regenerated
+        
+                // Don't schedule block generation in the same frame
+                return;
+            }
+     
+            // BUG! we don't check if the heightmap is ready before generating blocks
+            // used to be solved by job dependencies
+            if (hasDesiredChunks && heightMapReady)
+                ScheduleBlockGenerationJob(ref state);
+
+            
         }
-
+    
+        private void ScheduleBlockGenerationJob(ref SystemState state)
+        {
+            if (!blockHeightsWindow.IsCreated || blockHeightsWindow.Length == 0)
+                return;
+        
+            // make a check if all the blocks in the window are 0s - garbage data, even if it waits for the heightmap job handle
+            // bool allZero = true;
+            // for (int i = 0; i < blockHeightsWindow.Length; i++)
+            // {
+            //     if (blockHeightsWindow[i] != 0)
+            //     {
+            //         allZero = false;
+            //         break;
+            //     }
+            // }
+            // if (allZero)
+            //     throw new Exception("Block heights window is uninitialized (all zeros). Heightmap job may not have run.");
+            
+            // Get player position for block generation
+        
+            var ECBSystem = state.World.GetExistingSystemManaged<EndSimulationEntityCommandBufferSystem>();
+            var ecb = ECBSystem.CreateCommandBuffer();
+        
+            var generateChunkBlocksJob = new GenerateChunkBlocksJob
+            {
+                chunksLookup = chunksLookup,
+                blocksLookup = blocksLookup,
+                ecb = ecb.AsParallelWriter(),
+                desiredChunks = desiredChunks,
+                blockHeightsWindow = blockHeightsWindow,
+                windowEdgeBlockLength = windowEdgeBlockLength, 
+                playerChunkCoordXZ = playerChunkCoordXZ,
+            };
+     
+            // Check if we have a valid heightmap job handle
+            // If we updated the heightmap this frame, use that job handle
+            // Otherwise, just use the current state dependency
+            JobHandle dependency = state.Dependency;
+            if (!heightMapJobHandle.Equals(default(JobHandle)))
+            {
+                dependency = JobHandle.CombineDependencies(dependency, heightMapJobHandle);
+            }
+            var generateHandle = generateChunkBlocksJob.ScheduleParallel(
+                desiredChunks.Length, 1, 
+                dependency);
+            
+            state.Dependency = generateHandle;
+        }
+        
+        
         private void GetWorldParams(ref SystemState state)
         {
             if (math.all(perlinOffset == float2.zero))
@@ -164,19 +241,19 @@ namespace Project.Scripts.DOTS.Systems
 
                 centerBlockCoord = centerBlockCoord,
 
-                chunkXZCoords = newColumnsList,
+                chunkXZCoords = newChunkColumnsList,
                 blockHeightsWindow = blockHeightsWindow,
                 renderDistance = renderDistance,
                 windowEdgeBlockLength = windowEdgeBlockLength
             };
 
             heightMapJobHandle =
-                heightMapForBlockColumnsJob.ScheduleParallel(newColumnsList.Length, 1, state.Dependency);
+                heightMapForBlockColumnsJob.ScheduleParallel(newChunkColumnsList.Length, 1, state.Dependency);
 
             state.Dependency = heightMapJobHandle;
         }
 
-        private void UpdateWindow(int2 newCenter, int2 oldCenter)
+        private void MoveWindow(int2 newCenter, int2 oldCenter)
         {
             if (firstRun || !newCenter.Equals(oldCenter))
             {
@@ -228,6 +305,9 @@ namespace Project.Scripts.DOTS.Systems
         {
             desiredChunks.Clear();
 
+            var allChunksQuery = SystemAPI.QueryBuilder()
+                .WithAll<DOTS_ChunkState>()
+                .Build();
             var allChunks =
                 allChunksQuery.ToEntityArray(Allocator
                     .Temp); //remove from desired chunks entities which have chunkstate of different kind than ready forblockgeneration
@@ -264,9 +344,9 @@ namespace Project.Scripts.DOTS.Systems
         /// <param name="renderDistance"></param>
         /// <param name="chunkSize"></param>
         /// <returns></returns>
-        public NativeList<int2> GetNewColumnCoords(int2 oldCenter, int2 newCenter, int renderDistance, int chunkSize)
+        public NativeList<int2> GetNewChunkColumnCoords(int2 oldCenter, int2 newCenter, int chunkSize)
         {
-            newColumnsList.Clear();
+            newChunkColumnsList.Clear();
             int dx = newCenter.x - oldCenter.x;
             int dz = newCenter.y - oldCenter.y;
     
@@ -277,7 +357,7 @@ namespace Project.Scripts.DOTS.Systems
         
                 for (int cz = newCenter.y - renderDistance; cz <= newCenter.y + renderDistance; cz++)
                 for (int cx = newCenter.x - renderDistance; cx <= newCenter.x + renderDistance; cx++)
-                    newColumnsList.Add(new int2(cx * chunkSize, cz * chunkSize));
+                    newChunkColumnsList.Add(new int2(cx * chunkSize, cz * chunkSize));
             }
             else // For small movements: Generate only new strips
             {
@@ -286,31 +366,31 @@ namespace Project.Scripts.DOTS.Systems
                 {
                     int stripX = newCenter.x + renderDistance;
                     for (int z = newCenter.y - renderDistance; z <= newCenter.y + renderDistance; z++)
-                        newColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
+                        newChunkColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
                 }
                 // -X strip
                 if (dx < 0)
                 {
                     int stripX = newCenter.x - renderDistance;
                     for (int z = newCenter.y - renderDistance; z <= newCenter.y + renderDistance; z++)
-                        newColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
+                        newChunkColumnsList.Add(new int2(stripX * chunkSize, z * chunkSize));
                 }
                 // +Z strip
                 if (dz > 0)
                 {
                     int stripZ = newCenter.y + renderDistance;
                     for (int x = newCenter.x - renderDistance; x <= newCenter.x + renderDistance; x++)
-                        newColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
+                        newChunkColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
                 }
                 // -Z strip
                 if (dz < 0)
                 {
                     int stripZ = newCenter.y - renderDistance;
                     for (int x = newCenter.x - renderDistance; x <= newCenter.x + renderDistance; x++)
-                        newColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
+                        newChunkColumnsList.Add(new int2(x * chunkSize, stripZ * chunkSize));
                 }
             }
-            return newColumnsList;
+            return newChunkColumnsList;
         }
         
         
@@ -351,51 +431,47 @@ namespace Project.Scripts.DOTS.Systems
             if (shiftX == 0 && shiftZ == 0) return;
 
             // Create a temporary copy of the current window
-            var oldWindowCopy = new NativeArray<int>(window, Allocator.Temp);
-
+            var oldCopy = new NativeArray<int>(window, Allocator.Temp);
             // Clear the current window (we'll repopulate it)
             for (int i = 0; i < window.Length; i++)
             {
                 window[i] = 0;
             }
 
-            
-            // todo Wait... so should i  rework this to not consider the center chunk as special?
             // Calculate the half size using the same logic as getBlockWindowIndexXZ
-            int blockWindowHalf = windowEdgeBlockLength / 2;
+            int half = windowEdgeBlockLength / 2;
 
             // Iterate through all positions in the old window
             for (int z = 0; z < windowEdgeBlockLength; z++)
             for (int x = 0; x < windowEdgeBlockLength; x++)
             {
-                // Convert array indices to block offsets relative to the old center
-                int dx = x - blockWindowHalf;
-                int dz = z - blockWindowHalf;
+                // compute block offset relative to *new* center
+                int dxNew = x - half;
+                int dzNew = z - half;
 
-                // Calculate the new block offsets after the shift
-                int newDx = dx - shiftX;
-                int newDz = dz - shiftZ;
+                // corresponding position in old window (relative to old center)
+                int dxOld = dxNew + shiftX;
+                int dzOld = dzNew + shiftZ;
 
+                int newIndex = z * windowEdgeBlockLength + x;
                 // Check if the new block offsets are within the window bounds
                   
                 // Check if the old block offsets were within the window bounds
-                if (dx >= -blockWindowHalf && dx < blockWindowHalf &&
-                    dz >= -blockWindowHalf && dz < blockWindowHalf)
+                if (dxOld >= -half && dxOld < half && dzOld >= -half && dzOld < half)
                 {
-                    // Calculate the index in the old window
-                    int oldX = dx + blockWindowHalf;
-                    int oldZ = dz + blockWindowHalf;
+                    int oldX = dxOld + half;
+                    int oldZ = dzOld + half;
                     int oldIndex = oldZ * windowEdgeBlockLength + oldX;
-                
-                    // Calculate the index in the new window
-                    int newIndex = z * windowEdgeBlockLength + x;
-                
-                    // Copy the height value
-                    window[newIndex] = oldWindowCopy[oldIndex];
+                    window[newIndex] = oldCopy[oldIndex];
                 }
+                // else
+                // {
+                    // outside copied region -> mark as empty/uninitialized sentinel (so height job will fill it)
+                    // window[newIndex] = 0;
+                // }
             }
 
-            oldWindowCopy.Dispose();
+            oldCopy.Dispose();
         }
     }
 }

@@ -262,9 +262,11 @@ namespace Project.Scripts.DOTS.Other
         public static int getBlockWindowIndexXZ(int dx, int dz, int windowEdgeBlockLength)
         {
             // Make window symmetric around center
-            int windowHalf = (windowEdgeBlockLength - 1) / 2;
-            int x = (int)((dx + windowHalf + 0.5f));
-            int z = (int)((dz + windowHalf + 0.5f));
+            int half = windowEdgeBlockLength / 2;
+            int x = (int)((dx + half));
+            int z = (int)((dz + half));
+            if (x < 0 || x >= windowEdgeBlockLength || z < 0 || z >= windowEdgeBlockLength)
+                return -1;
             int index = z * windowEdgeBlockLength + x;
             return index;
         }
