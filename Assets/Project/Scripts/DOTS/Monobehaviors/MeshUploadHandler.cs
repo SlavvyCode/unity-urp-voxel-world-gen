@@ -3,6 +3,7 @@ using Project.Scripts.DOTS.Other;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -25,6 +26,10 @@ public class MeshUploadHandler : MonoBehaviour
         {
             MeshFilter filter = entityManager.GetComponentObject<MeshFilter>(request.MeshEntity);
             MeshRenderer renderer = entityManager.GetComponentObject<MeshRenderer>(request.MeshEntity);
+
+            //todo maybe i shouldn't be using world coords for bounds, but chunk local coords?
+
+            // entityManager.SetComponentEnabled<MaterialMeshInfo>(request.MeshEntity, true);
 
             // get mesh from pool or create new
             Mesh mesh = meshPool.Count > 0 ? meshPool.Pop() : new Mesh { indexFormat = IndexFormat.UInt32 };

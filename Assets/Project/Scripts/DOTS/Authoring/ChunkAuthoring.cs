@@ -78,6 +78,7 @@ public struct MeshDataRequest
 public enum ChunkStateEnum : byte
 {
     NotSpawned,
+    Pooled,              // In chunk pool, ready to be used
     ArrayPending,       // Chunk just created, not filled yet
     BlockGenPending,         // in chunkArray
     MeshPending,         // Blocks filled and Waiting for mesh generation
